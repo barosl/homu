@@ -10,19 +10,23 @@ import logging
 
 class PullReqState:
     num = 0
-    approved_by = ''
-    priority = 0
-    status = ''
-    head_sha = ''
-    merge_sha = ''
-    build_res = {}
-    try_ = False
-    rollup = False
 
     def __init__(self, num, head_sha, status):
+        self.head_advanced('')
+
         self.num = num
         self.head_sha = head_sha
         self.status = status
+
+    def head_advanced(self, head_sha):
+        self.head_sha = head_sha
+        self.approved_by = ''
+        self.priority = 0
+        self.status = ''
+        self.merge_sha = ''
+        self.build_res = {}
+        self.try_ = False
+        self.rollup = False
 
     def __repr__(self):
         return 'PullReqState#{}(approved_by={}, priority={}, status={})'.format(

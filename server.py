@@ -160,13 +160,20 @@ class RequestHandler(BaseHTTPRequestHandler):
                 head_sha = info['pull_request']['head']['sha']
 
                 if action == 'synchronize':
-                    self.server.states[repo_name][pull_num].approved_by = ''
+                    self.server.states[repo_name][pull_num].head_advanced(head_sha)
                 elif action in ['opened', 'reopened']:
                     self.server.states[repo_name][pull_num] = PullReqState(pull_num, head_sha, '') # FIXME: status, comments
                 elif action == 'closed':
                     del self.server.states[repo_name][pull_num]
                 else:
                     self.server.logger.debug('Invalid pull_request action: {}'.format(action))
+
+            elif event_type == 'push':
+                repo_name = info['repository']['name']
+
+                for state in self.server.states[repo_name].values():
+                    if state.head_sha == info['before']:
+                        state.head_advanced(info['after'])
 
             resp_status = 200
             resp_text = ''
