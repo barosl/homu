@@ -17,3 +17,4 @@ builders = ["auto-linux", "auto-mac"]
 master_branch = "master"
 buildbot_branch = "auto"
 tmp_branch = "tmp"
+rollup_branch = "rollup"

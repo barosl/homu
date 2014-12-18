@@ -17,6 +17,7 @@ class PullReqState:
     merge_sha = ''
     build_res = {}
     try_ = False
+    rollup = False
 
     def __init__(self, num, head_sha, status):
         self.num = num
@@ -66,6 +67,12 @@ def parse_commands(body, username, state, *, realtime=False):
         elif word == 'try' and realtime:
             state.try_ = True
 
+        elif word == 'rollup':
+            state.rollup = True
+
+        elif word == 'rollup-':
+            state.rollup = False
+
         else:
             found = False
 
@@ -83,9 +90,17 @@ def start_build(state, repo, repo_cfgs, buildbot_slots, logger):
 
     master_sha = repo.ref('heads/' + repo_cfg['master_branch']).object.sha
     try:
-        js = utils.github_set_ref(repo, 'heads/' + repo_cfg['tmp_branch'], master_sha, force=True)
+        utils.github_set_ref(
+            repo,
+            'heads/' + repo_cfg['tmp_branch'],
+            master_sha,
+            force=True,
+        )
     except github3.models.GitHubError:
-        js = repo.create_ref('refs/heads/' + repo_cfg['tmp_branch'], master_sha)
+        repo.create_ref(
+            'refs/heads/' + repo_cfg['tmp_branch'],
+            master_sha,
+        )
 
     merge_msg = 'Merge {:.7} into {}\n\nApproved-by: {}'.format(
         state.head_sha,
@@ -111,7 +126,7 @@ def start_build(state, repo, repo_cfgs, buildbot_slots, logger):
     return True
 
 def process_queue(states, repos, repo_cfgs, logger, cfg, buildbot_slots):
-    for repo in repos:
+    for repo in repos.values():
         repo_states = sorted(states[repo.name].values())
 
         for state in repo_states:
@@ -141,7 +156,7 @@ def main():
     gh = github3.login(token=cfg['main']['token'])
 
     states = {}
-    repos = []
+    repos = {}
     repo_cfgs = {}
     buildbot_slots = ['']
 
@@ -151,7 +166,7 @@ def main():
         repo = gh.repository(repo_cfg['owner'], repo_cfg['repo'])
 
         states[repo.name] = {}
-        repos.append(repo)
+        repos[repo.name] = repo
         repo_cfgs[repo.name] = repo_cfg
 
         for pull in repo.iter_pulls(state='open'):
