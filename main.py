@@ -111,21 +111,24 @@ def start_build(state, repo, repo_cfgs, buildbot_slots, logger):
         repo_cfg['tmp_branch'],
         state.approved_by,
     )
-    merge_commit = repo.merge(repo_cfg['tmp_branch'], state.head_sha, merge_msg)
+    try: merge_commit = repo.merge(repo_cfg['tmp_branch'], state.head_sha, merge_msg)
+    except github3.models.GitHubError as e:
+        if e.code != 409: raise
 
-    utils.github_set_ref(repo, 'heads/' + repo_cfg['buildbot_branch'], merge_commit.sha, force=True)
+        repo.create_status(state.head_sha, 'error', '', 'Merge conflict')
+    else:
+        utils.github_set_ref(repo, 'heads/' + repo_cfg['buildbot_branch'], merge_commit.sha, force=True)
 
-    state.status = 'pending'
-    state.build_res = {x: None for x in repo_cfgs[repo.name]['builders']}
-    state.merge_sha = merge_commit.sha
+        state.status = 'pending'
+        state.build_res = {x: None for x in repo_cfgs[repo.name]['builders']}
+        state.merge_sha = merge_commit.sha
 
-    buildbot_slots[0] = state.merge_sha
+        buildbot_slots[0] = state.merge_sha
 
-    logger.info('Starting build: {}'.format(state.merge_sha))
+        logger.info('Starting build: {}'.format(state.merge_sha))
 
-    url = '' # FIXME
-    desc = 'Testing candidate {}...'.format(state.merge_sha)
-    repo.create_status(state.head_sha, 'pending', url, desc)
+        desc = 'Testing candidate {}...'.format(state.merge_sha)
+        repo.create_status(state.head_sha, 'pending', '', desc)
 
     return True
 
