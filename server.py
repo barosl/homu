@@ -6,6 +6,7 @@ import urllib.parse
 from main import PullReqState, parse_commands
 import utils
 from socketserver import ThreadingMixIn
+import github3
 
 class RequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -130,12 +131,15 @@ class RequestHandler(BaseHTTPRequestHandler):
                             state.build_res[builder] = True
 
                             if all(state.build_res.values()):
-                                desc = 'Test successful'
-                                repo.create_status(state.head_sha, 'success', url, desc)
-
                                 state.status = 'success'
+                                repo.create_status(state.head_sha, 'success', url, 'Test successful')
 
-                                utils.github_set_ref(repo, 'heads/' + self.server.repo_cfgs[repo.name]['master_branch'], state.merge_sha)
+                                if state.approved_by and not state.try_:
+                                    try:
+                                        utils.github_set_ref(repo, 'heads/' + self.server.repo_cfgs[repo.name]['master_branch'], state.merge_sha)
+                                    except github3.models.GitHubError:
+                                        state.status = 'error'
+                                        repo.create_status(state.head_sha, 'error', url, 'Test was successful, but fast-forwarding failed')
 
                                 self.server.queue_handler()
 
@@ -143,8 +147,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                             state.build_res[builder] = False
 
                             if state.status == 'pending':
-                                desc = 'Test failed'
-                                repo.create_status(state.head_sha, 'failure', url, desc)
+                                repo.create_status(state.head_sha, 'failure', url, 'Test failed')
 
                                 state.status = 'failure'
 
@@ -152,6 +155,15 @@ class RequestHandler(BaseHTTPRequestHandler):
 
                     else:
                         self.server.logger.debug('Invalid commit from Buildbot: {}'.format(rev))
+
+                elif row['event'] == 'buildStarted':
+                    info = row['payload']['build']
+                    rev = [x[1] for x in info['properties'] if x[0] == 'revision'][0]
+
+                    if self.server.buildbot_slots[0] == rev:
+                        self.server.buildbot_slots[0] = ''
+
+                        self.server.queue_handler()
 
             resp_status = 200
             resp_text = ''
@@ -169,7 +181,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     pass
 
-def start(cfg, states, queue_handler, repo_cfgs, repos, logger):
+def start(cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots):
     server = ThreadedHTTPServer(('', cfg['main']['port']), RequestHandler)
 
     server.hmac_key = cfg['main']['hmac_key'].encode('utf-8')
@@ -179,5 +191,6 @@ def start(cfg, states, queue_handler, repo_cfgs, repos, logger):
     server.repo_cfgs = repo_cfgs
     server.repos = repos
     server.logger = logger
+    server.buildbot_slots = buildbot_slots
 
     Thread(target=server.serve_forever).start()

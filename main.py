@@ -16,6 +16,7 @@ class PullReqState:
     head_sha = ''
     merge_sha = ''
     build_res = {}
+    try_ = False
 
     def __init__(self, num, head_sha, status):
         self.num = num
@@ -40,7 +41,7 @@ class PullReqState:
     def __lt__(self, other):
         return self.sort_key() < other.sort_key()
 
-def parse_commands(body, username, state, realtime=False):
+def parse_commands(body, username, state, *, realtime=False):
     state_changed = False
 
     for word in re.findall(r'\S+', body):
@@ -62,6 +63,9 @@ def parse_commands(body, username, state, realtime=False):
         elif word == 'retry' and realtime:
             state.status = ''
 
+        elif word == 'try' and realtime:
+            state.try_ = True
+
         else:
             found = False
 
@@ -70,49 +74,63 @@ def parse_commands(body, username, state, realtime=False):
 
     return state_changed
 
-def process_queue(states, repos, repo_cfgs, logger, cfg):
+def start_build(state, repo, repo_cfgs, buildbot_slots, logger):
+    if buildbot_slots[0]: return False
+
+    assert state.head_sha == repo.pull_request(state.num).head.sha
+
+    repo_cfg = repo_cfgs[repo.name]
+
+    master_sha = repo.ref('heads/' + repo_cfg['master_branch']).object.sha
+    try:
+        js = utils.github_set_ref(repo, 'heads/' + repo_cfg['tmp_branch'], master_sha, force=True)
+    except github3.models.GitHubError:
+        js = repo.create_ref('refs/heads/' + repo_cfg['tmp_branch'], master_sha)
+
+    merge_msg = 'Merge {:.7} into {}\n\nApproved-by: {}'.format(
+        state.head_sha,
+        repo_cfg['tmp_branch'],
+        state.approved_by,
+    )
+    merge_commit = repo.merge(repo_cfg['tmp_branch'], state.head_sha, merge_msg)
+
+    utils.github_set_ref(repo, 'heads/' + repo_cfg['buildbot_branch'], merge_commit.sha, force=True)
+
+    state.status = 'pending'
+    state.build_res = {x: None for x in repo_cfgs[repo.name]['builders']}
+    state.merge_sha = merge_commit.sha
+
+    buildbot_slots[0] = state.merge_sha
+
+    logger.info('Starting build: {}'.format(state.merge_sha))
+
+    url = '' # FIXME
+    desc = 'Testing candidate {}...'.format(state.merge_sha)
+    repo.create_status(state.head_sha, 'pending', url, desc)
+
+    return True
+
+def process_queue(states, repos, repo_cfgs, logger, cfg, buildbot_slots):
     for repo in repos:
         repo_states = sorted(states[repo.name].values())
-        repo_cfg = repo_cfgs[repo.name]
-        pending_pulls = 0
 
         for state in repo_states:
             if state.status == 'pending':
-                pending_pulls += 1
+                break
 
             elif state.status == '' and state.approved_by:
-                pending_pulls += 1
-
-                assert state.head_sha == repo.pull_request(state.num).head.sha
-
-                master_sha = repo.ref('heads/' + repo_cfg['master_branch']).object.sha
-                try:
-                    js = utils.github_set_ref(repo, 'heads/' + repo_cfg['tmp_branch'], master_sha, force=True)
-                except github3.models.GitHubError:
-                    js = repo.create_ref('refs/heads/' + repo_cfg['tmp_branch'], master_sha)
-
-                merge_msg = 'Merge {:.7} into {}\n\nApproved-by: {}'.format(
-                    state.head_sha,
-                    repo_cfg['tmp_branch'],
-                    state.approved_by,
-                )
-
-                merge_commit = repo.merge(repo_cfg['tmp_branch'], state.head_sha, merge_msg)
-
-                utils.github_set_ref(repo, 'heads/' + repo_cfg['buildbot_branch'], merge_commit.sha, force=True)
-
-                state.status = 'pending'
-                state.build_res = {x: None for x in repo_cfgs[repo.name]['builders']}
-                state.merge_sha = merge_commit.sha
-
-                logger.info('Starting build: {}'.format(state.merge_sha))
-
-                url = '' # FIXME
-                desc = 'Testing candidate {}...'.format(state.merge_sha)
-                repo.create_status(state.head_sha, 'pending', url, desc)
-
-            if pending_pulls >= 1: # FIXME
+                start_build(state, repo, repo_cfgs, buildbot_slots, logger)
                 break
+
+            elif state.status == 'success' and state.try_:
+                state.try_ = False
+
+                start_build(state, repo, repo_cfgs, buildbot_slots, logger)
+                break
+
+        for state in repo_states:
+            if state.status == '' and state.try_:
+                start_build(state, repo, repo_cfgs, buildbot_slots, logger)
 
 def main():
     logger = logging.getLogger('homu')
@@ -125,8 +143,9 @@ def main():
     states = {}
     repos = []
     repo_cfgs = {}
+    buildbot_slots = ['']
 
-    queue_handler = lambda: process_queue(states, repos, repo_cfgs, logger, cfg)
+    queue_handler = lambda: process_queue(states, repos, repo_cfgs, logger, cfg, buildbot_slots)
 
     for repo_cfg in cfg['repo']:
         repo = gh.repository(repo_cfg['owner'], repo_cfg['repo'])
@@ -148,17 +167,17 @@ def main():
                     comment.user.login in repo_cfg['reviewers'] and
                     comment.original_commit_id == pull.head.sha
                 ):
-                    if parse_commands(
+                    parse_commands(
                         comment.body,
                         comment.user.login,
                         state,
-                        queue_handler,
-                    ):
-                        queue_handler()
+                    )
 
             states[repo.name][pull.number] = state
 
-    server.start(cfg, states, queue_handler, repo_cfgs, repos, logger)
+    server.start(cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots)
+
+    queue_handler()
 
 if __name__ == '__main__':
     main()

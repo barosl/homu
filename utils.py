@@ -1,7 +1,7 @@
 import json
 import github3
 
-def github_set_ref(repo, ref, sha, force=False):
+def github_set_ref(repo, ref, sha, *, force=False):
     url = repo._build_url('git', 'refs', ref, base_url=repo._api)
     data = {'sha': sha, 'force': force}
 
