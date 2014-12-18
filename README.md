@@ -17,6 +17,32 @@ Homu is a continuous integration service bot that works with GitHub and
    feature. This approach improves the overall performance and the response
    time, because the bot is informed about the status changes immediately.
 
+## Additional features
+
+1. `try`: Test a pull request without blocking the queue.
+2. `rollup`: Mark a pull request as part of a rollup.
+
+You should specify the commands in the "files changed" tab.
+
+## Configurations
+
+1. Add a Webhook to your repository:
+
+ - Payload URL: http://HOST:PORT/github
+ - Content type: application/json
+ - Secret: The same as `hmac_key` in cfg.toml
+
+2. Insert the following code to the Buildbot configuration:
+
+```python
+from buildbot.status.status_push import HttpStatusPush
+
+c['status'].append(HttpStatusPush(
+    serverUrl='http://HOST:PORT/buildbot',
+    extra_post_params={'key': 'buildbot_key in cfg.toml'},
+))
+```
+
 ## How to install
 
 ```sh
@@ -29,5 +55,5 @@ pyvenv .venv
 ## How to run
 
 ```sh
-.venv/bin/python homu.py
+.venv/bin/python main.py
 ```
