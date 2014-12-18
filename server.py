@@ -19,10 +19,15 @@ class RequestHandler(BaseHTTPRequestHandler):
                 button { display: block; margin: 15px 0; }
                 h1 { font-size: 20px; }
                 h2 { font-size: 16px; }
+                .undecided { background-color: #ddd; }
+                .success { background-color: #0f0; }
+                .failure, .error { background-color: red; }
+                .pending { background-color: yellow; }
             </style>\n''')
             res.append('<h1>Homu queue</h1>\n')
 
             for repo_name in self.server.states:
+                repo = self.server.repos[repo_name]
                 pull_states = sorted(self.server.states[repo_name].values())
 
                 res.append('<h2>{}</h2>\n'.format(repo_name))
@@ -31,11 +36,12 @@ class RequestHandler(BaseHTTPRequestHandler):
                 res.append('<tr><th>Status</th><th>Priority</th><th>Number</th><th>Approved by</th></tr>\n')
 
                 for state in pull_states:
-                    res.append('<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>\n'.format(
-                        state.status if state.status else '(Undecided)',
+                    res.append('<tr class="{0}"><td>{0}</td><td>{1}</td><td><a href="{2}">{3}</a></td><td>{4}</td></tr>\n'.format(
+                        state.status if state.status else 'undecided',
                         state.priority,
+                        'https://github.com/{}/{}/pull/{}'.format(repo.owner, repo.name, state.num),
                         state.num,
-                        state.approved_by if state.approved_by else '(None)',
+                        state.approved_by if state.approved_by else '(empty)',
                     ))
 
                 res.append('</table>\n')
