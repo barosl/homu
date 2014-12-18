@@ -1,0 +1,19 @@
+[main]
+
+token = ""
+port = 7942
+hmac_key = ""
+buildbot_key = ""
+
+[[repo]]
+
+owner = ""
+repo = ""
+
+reviewers = ["barosl"]
+buildbot_url = ""
+builders = ["auto-linux", "auto-mac"]
+
+master_branch = "master"
+buildbot_branch = "auto"
+tmp_branch = "tmp"
