@@ -5,6 +5,7 @@ import json
 import urllib.parse
 from main import PullReqState, parse_commands
 import utils
+from socketserver import ThreadingMixIn
 
 class RequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -165,8 +166,11 @@ class RequestHandler(BaseHTTPRequestHandler):
 
         self.wfile.write(resp_text.encode('utf-8'))
 
+class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+    pass
+
 def start(cfg, states, queue_handler, repo_cfgs, repos, logger):
-    server = HTTPServer(('', cfg['main']['port']), RequestHandler)
+    server = ThreadedHTTPServer(('', cfg['main']['port']), RequestHandler)
 
     server.hmac_key = cfg['main']['hmac_key'].encode('utf-8')
     server.cfg = cfg
