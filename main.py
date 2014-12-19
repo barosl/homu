@@ -46,7 +46,10 @@ class PullReqState:
     def __lt__(self, other):
         return self.sort_key() < other.sort_key()
 
-def parse_commands(body, username, state, *, realtime=False):
+def parse_commands(body, username, reviewers, state, *, realtime=False):
+    if username not in reviewers:
+        return
+
     state_changed = False
 
     for word in re.findall(r'\S+', body):
@@ -185,13 +188,11 @@ def main():
             repo.iter_statuses(pull.head.sha)
 
             for comment in pull.iter_comments():
-                if (
-                    comment.user.login in repo_cfg['reviewers'] and
-                    comment.original_commit_id == pull.head.sha
-                ):
+                if comment.original_commit_id == pull.head.sha:
                     parse_commands(
                         comment.body,
                         comment.user.login,
+                        repo_cfg['reviewers'],
                         state,
                     )
 

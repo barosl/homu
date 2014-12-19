@@ -151,9 +151,12 @@ class RequestHandler(BaseHTTPRequestHandler):
                     body = info['comment']['body']
                     username = info['sender']['login']
 
+                    repo_cfg = self.server.repo_cfgs[repo_name]
+
                     if parse_commands(
                         body,
                         username,
+                        repo_cfg['reviewers'],
                         self.server.states[repo_name][pull_num],
                         realtime=True,
                     ):
