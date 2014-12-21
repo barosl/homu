@@ -223,7 +223,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
                             if all(state.build_res.values()):
                                 state.status = 'success'
-                                repo.create_status(state.head_sha, 'success', url, 'Test successful')
+                                utils.github_create_status(repo, state.head_sha, 'success', url, 'Test successful', context='homu')
 
                                 if state.approved_by and not state.try_:
                                     try:
@@ -234,7 +234,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                                         )
                                     except github3.models.GitHubError:
                                         state.status = 'error'
-                                        repo.create_status(state.head_sha, 'error', url, 'Test was successful, but fast-forwarding failed')
+                                        utils.github_create_status(repo, state.head_sha, 'error', url, 'Test was successful, but fast-forwarding failed', context='homu')
 
                                 self.server.queue_handler()
 
@@ -242,7 +242,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                             state.build_res[builder] = False
 
                             if state.status == 'pending':
-                                repo.create_status(state.head_sha, 'failure', url, 'Test failed')
+                                utils.github_create_status(repo, state.head_sha, 'failure', url, 'Test failed', context='homu')
 
                                 state.status = 'failure'
 

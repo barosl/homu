@@ -118,7 +118,7 @@ def start_build(state, repo, repo_cfgs, buildbot_slots, logger):
     except github3.models.GitHubError as e:
         if e.code != 409: raise
 
-        repo.create_status(state.head_sha, 'error', '', 'Merge conflict')
+        utils.github_create_status(repo, state.head_sha, 'error', '', 'Merge conflict', context='homu')
     else:
         utils.github_set_ref(repo, 'heads/' + repo_cfg['buildbot_branch'], merge_commit.sha, force=True)
 
@@ -131,7 +131,7 @@ def start_build(state, repo, repo_cfgs, buildbot_slots, logger):
         logger.info('Starting build: {}'.format(state.merge_sha))
 
         desc = 'Testing candidate {}...'.format(state.merge_sha)
-        repo.create_status(state.head_sha, 'pending', '', desc)
+        utils.github_create_status(repo, state.head_sha, 'pending', '', desc, context='homu')
 
     return True
 
@@ -180,12 +180,13 @@ def main():
         repo_cfgs[repo.name] = repo_cfg
 
         for pull in repo.iter_pulls(state='open'):
-            try: status = next(repo.iter_statuses(pull.head.sha)).state
-            except StopIteration: status = ''
+            status = ''
+            for info in utils.github_iter_statuses(repo, pull.head.sha):
+                if info.context == 'homu':
+                    status = info.state
+                    break
 
             state = PullReqState(pull.number, pull.head.sha, status)
-
-            repo.iter_statuses(pull.head.sha)
 
             for comment in pull.iter_comments():
                 if comment.original_commit_id == pull.head.sha:
