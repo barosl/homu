@@ -89,7 +89,8 @@ def parse_commands(body, username, reviewers, state, *, realtime=False):
     return state_changed
 
 def start_build(state, repo, repo_cfgs, buildbot_slots, logger):
-    if buildbot_slots[0]: return False
+    if buildbot_slots[0]:
+        return True
 
     assert state.head_sha == repo.pull_request(state.num).head.sha
 
@@ -119,10 +120,12 @@ def start_build(state, repo, repo_cfgs, buildbot_slots, logger):
         if e.code != 409: raise
 
         utils.github_create_status(repo, state.head_sha, 'error', '', 'Merge conflict', context='homu')
+        state.status = 'error'
+
+        return False
     else:
         utils.github_set_ref(repo, 'heads/' + repo_cfg['buildbot_branch'], merge_commit.sha, force=True)
 
-        state.status = 'pending'
         state.build_res = {x: None for x in repo_cfgs[repo.name]['builders']}
         state.merge_sha = merge_commit.sha
 
@@ -132,6 +135,7 @@ def start_build(state, repo, repo_cfgs, buildbot_slots, logger):
 
         desc = 'Testing candidate {}...'.format(state.merge_sha)
         utils.github_create_status(repo, state.head_sha, 'pending', '', desc, context='homu')
+        state.status = 'pending'
 
     return True
 
@@ -144,14 +148,14 @@ def process_queue(states, repos, repo_cfgs, logger, cfg, buildbot_slots):
                 break
 
             elif state.status == '' and state.approved_by:
-                start_build(state, repo, repo_cfgs, buildbot_slots, logger)
-                break
+                if start_build(state, repo, repo_cfgs, buildbot_slots, logger):
+                    break
 
             elif state.status == 'success' and state.try_:
                 state.try_ = False
 
-                start_build(state, repo, repo_cfgs, buildbot_slots, logger)
-                break
+                if start_build(state, repo, repo_cfgs, buildbot_slots, logger):
+                    break
 
         for state in repo_states:
             if state.status == '' and state.try_:
