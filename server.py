@@ -7,47 +7,37 @@ from main import PullReqState, parse_commands
 import utils
 from socketserver import ThreadingMixIn
 import github3
+import jinja2
 
 class RequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/':
-            res = []
+            resp_status = 200
+            resp_text = self.server.tpls['index'].render(repos=sorted(self.server.repos))
 
-            res.append('''<style>
-                table { border-collapse: collapse; }
-                td, th { border: 1px solid black; padding: 5px; font-size: 13px; }
-                button { display: block; margin: 15px 0; }
-                h1 { font-size: 20px; }
-                h2 { font-size: 16px; }
-                .undecided { background-color: #ddd; }
-                .success { background-color: #0f0; }
-                .failure, .error { background-color: red; }
-                .pending { background-color: yellow; }
-            </style>\n''')
-            res.append('<h1>Homu queue</h1>\n')
+        elif self.path.startswith('/queue/'):
+            repo_name = self.path.split('/', 2)[2]
 
-            for repo_name in self.server.states:
-                repo = self.server.repos[repo_name]
-                pull_states = sorted(self.server.states[repo_name].values())
+            repo = self.server.repos[repo_name]
+            pull_states = sorted(self.server.states[repo_name].values())
 
-                res.append('<h2>{}</h2>\n'.format(repo_name))
-                res.append('<button type="button" onclick="if (confirm(\'A new pull request will be created. Continue?\')) location = \'/rollup/{}\';">Create a rollup</button>\n'.format(repo_name))
-                res.append('<table>\n')
-                res.append('<tr><th>Status</th><th>Priority</th><th>Number</th><th>Approved by</th></tr>\n')
-
-                for state in pull_states:
-                    res.append('<tr class="{0}"><td>{0}</td><td>{1}</td><td><a href="{2}">{3}</a></td><td>{4}</td></tr>\n'.format(
-                        state.status if state.status else 'undecided',
-                        state.priority,
-                        'https://github.com/{}/{}/pull/{}'.format(repo.owner, repo.name, state.num),
-                        state.num,
-                        state.approved_by if state.approved_by else '(empty)',
-                    ))
-
-                res.append('</table>\n')
+            rows = []
+            for state in pull_states:
+                rows.append({
+                    'status': state.status if state.status else 'undecided',
+                    'priority': state.priority,
+                    'url': 'https://github.com/{}/{}/pull/{}'.format(repo.owner, repo.name, state.num),
+                    'num': state.num,
+                    'approved_by': state.approved_by if state.approved_by else '(empty)',
+                    'title': state.title,
+                    'head_ref': state.head_ref,
+                })
 
             resp_status = 200
-            resp_text = ''.join(res)
+            resp_text = self.server.tpls['queue'].render(
+                repo_name = repo.name,
+                states = rows,
+            )
 
         elif self.path.startswith('/rollup/'):
             repo_name = self.path[len('/rollup/'):]
@@ -171,7 +161,11 @@ class RequestHandler(BaseHTTPRequestHandler):
                 if action == 'synchronize':
                     self.server.states[repo_name][pull_num].head_advanced(head_sha)
                 elif action in ['opened', 'reopened']:
-                    self.server.states[repo_name][pull_num] = PullReqState(pull_num, head_sha, '') # FIXME: status, comments
+                    state = PullReqState(pull_num, head_sha, '') # FIXME: status, comments
+                    state.title = info['pull_request']['title']
+                    state.head_ref = info['pull_request']['head']['repo']['owner']['login'] + ':' + info['pull_request']['head']['ref']
+
+                    self.server.states[repo_name][pull_num] = state
                 elif action == 'closed':
                     del self.server.states[repo_name][pull_num]
                 else:
@@ -278,6 +272,11 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
 def start(cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots):
     server = ThreadedHTTPServer(('', cfg['main']['port']), RequestHandler)
 
+    tpls = {}
+    env = jinja2.Environment(loader=jinja2.FileSystemLoader('html'))
+    tpls['index'] = env.get_template('index.html')
+    tpls['queue'] = env.get_template('queue.html')
+
     server.hmac_key = cfg['main']['hmac_key'].encode('utf-8')
     server.cfg = cfg
     server.states = states
@@ -286,5 +285,6 @@ def start(cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots):
     server.repos = repos
     server.logger = logger
     server.buildbot_slots = buildbot_slots
+    server.tpls = tpls
 
     Thread(target=server.serve_forever).start()
