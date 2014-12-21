@@ -69,8 +69,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                 failures = []
 
                 for state in rollup_states:
-                    merge_msg = 'Merge {:.7} into {}\n\nApproved-by: {}'.format(
-                        state.head_sha,
+                    merge_msg = 'Merge #{} into {}\n\nApproved-by: {}'.format(
+                        state.num,
                         repo_cfg['rollup_branch'],
                         state.approved_by,
                     )

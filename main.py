@@ -112,8 +112,8 @@ def start_build(state, repo, repo_cfgs, buildbot_slots, logger):
             master_sha,
         )
 
-    merge_msg = 'Merge {:.7} into {}\n\nApproved-by: {}'.format(
-        state.head_sha,
+    merge_msg = 'Merge #{} into {}\n\nApproved-by: {}'.format(
+        state.num,
         repo_cfg['tmp_branch'],
         state.approved_by,
     )
