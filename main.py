@@ -7,11 +7,15 @@ import re
 import server
 import utils
 import logging
+from threading import Thread
+import time
+import traceback
 
 class PullReqState:
     num = 0
     title = ''
     head_ref = ''
+    mergeable = None
 
     def __init__(self, num, head_sha, status):
         self.head_advanced('')
@@ -40,6 +44,7 @@ class PullReqState:
 
     def sort_key(self):
         return [
+            0 if self.mergeable is True else 1,
             0 if self.approved_by else 1,
             -self.priority,
             self.num,
@@ -136,7 +141,7 @@ def start_build(state, repo, repo_cfgs, buildbot_slots, logger):
 
         buildbot_slots[0] = state.merge_sha
 
-        logger.info('Starting build: {}'.format(state.merge_sha))
+        logger.info('Starting build of #{}: {}'.format(state.num, state.merge_sha))
 
         desc = 'Testing candidate {}...'.format(state.merge_sha)
         utils.github_create_status(repo, state.head_sha, 'pending', '', desc, context='homu')
@@ -168,8 +173,22 @@ def process_queue(states, repos, repo_cfgs, logger, cfg, buildbot_slots):
             if state.status == '' and state.try_:
                 start_build(state, repo, repo_cfgs, buildbot_slots, logger)
 
+def fetch_mergeability(states, repos):
+    while True:
+        try:
+            for repo in repos.values():
+                for state in states[repo.name].values():
+                    if state.mergeable is None:
+                        state.mergeable = repo.pull_request(state.num).mergeable
+        except:
+            traceback.print_exc()
+
+        time.sleep(60*10)
+
 def main():
     logger = logging.getLogger('homu')
+    logger.setLevel(logging.INFO)
+    logger.addHandler(logging.StreamHandler())
 
     with open('cfg.toml') as fp:
         cfg = toml.loads(fp.read())
@@ -182,6 +201,8 @@ def main():
     buildbot_slots = ['']
 
     queue_handler = lambda: process_queue(states, repos, repo_cfgs, logger, cfg, buildbot_slots)
+
+    logger.info('Retrieving pull requests...')
 
     for repo_cfg in cfg['repo']:
         repo = gh.repository(repo_cfg['owner'], repo_cfg['repo'])
@@ -212,7 +233,11 @@ def main():
 
             states[repo.name][pull.number] = state
 
+    logger.info('Done!')
+
     server.start(cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots)
+
+    Thread(target=fetch_mergeability, args=[states, repos]).start()
 
     queue_handler()
 

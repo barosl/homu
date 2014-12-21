@@ -31,6 +31,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     'approved_by': state.approved_by if state.approved_by else '(empty)',
                     'title': state.title,
                     'head_ref': state.head_ref,
+                    'mergeable': 'yes' if state.mergeable is True else 'no' if state.mergeable is False else 'unknown',
                 })
 
             resp_status = 200
@@ -159,11 +160,14 @@ class RequestHandler(BaseHTTPRequestHandler):
                 head_sha = info['pull_request']['head']['sha']
 
                 if action == 'synchronize':
-                    self.server.states[repo_name][pull_num].head_advanced(head_sha)
+                    state = self.server.states[repo_name][pull_num]
+                    state.head_advanced(head_sha)
+                    state.mergeable = None
                 elif action in ['opened', 'reopened']:
                     state = PullReqState(pull_num, head_sha, '') # FIXME: status, comments
                     state.title = info['pull_request']['title']
                     state.head_ref = info['pull_request']['head']['repo']['owner']['login'] + ':' + info['pull_request']['head']['ref']
+                    state.mergeable = info['pull_request']['mergeable']
 
                     self.server.states[repo_name][pull_num] = state
                 elif action == 'closed':
@@ -175,6 +179,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                 repo_name = info['repository']['name']
 
                 for state in self.server.states[repo_name].values():
+                    state.mergeable = None
+
                     if state.head_sha == info['before']:
                         state.head_advanced(info['after'])
 

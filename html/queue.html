@@ -4,15 +4,21 @@
         <meta charset="utf-8">
         <title>Homu queue - {{repo_name}}</title>
         <style>
+            h1 { font-size: 20px; }
+            h2 { font-size: 16px; }
+
             table { border-collapse: collapse; }
             td, th { border: 1px solid black; padding: 5px; font-size: 13px; }
             button { display: block; margin: 15px 0; }
-            h1 { font-size: 20px; }
-            h2 { font-size: 16px; }
+
             .undecided { background-color: #ddd; }
             .success { background-color: #0f0; }
             .failure, .error { background-color: red; }
             .pending { background-color: yellow; }
+
+            .yes { color: green; }
+            .no { color: red; }
+            .unknown { color: yellow; }
         </style>
     </head>
     <body>
@@ -26,6 +32,7 @@
                 <th>Head ref</th>
                 <th>Title</th>
                 <th>Approved by</th>
+                <th>Mergeable</th>
             </tr>
 
             {% for state in states %}
@@ -36,6 +43,7 @@
                 <td>{{state.head_ref}}</td>
                 <td>{{state.title}}</td>
                 <td>{{state.approved_by}}</td>
+                <td class="{{state.mergeable}}">{{state.mergeable}}</td>
             </tr>
             {% endfor %}
         </table>
