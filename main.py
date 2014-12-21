@@ -16,6 +16,7 @@ class PullReqState:
     title = ''
     head_ref = ''
     mergeable = None
+    assignee = ''
 
     def __init__(self, num, head_sha, status):
         self.head_advanced('')
@@ -221,6 +222,7 @@ def main():
             state = PullReqState(pull.number, pull.head.sha, status)
             state.title = pull.title
             state.head_ref = pull.head.repo[0] + ':' + pull.head.ref
+            state.assignee = pull.assignee.login if pull.assignee else ''
 
             for comment in pull.iter_comments():
                 if comment.original_commit_id == pull.head.sha:

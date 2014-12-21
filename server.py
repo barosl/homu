@@ -32,6 +32,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     'title': state.title,
                     'head_ref': state.head_ref,
                     'mergeable': 'yes' if state.mergeable is True else 'no' if state.mergeable is False else 'unknown',
+                    'assignee': state.assignee,
                 })
 
             resp_status = 200
@@ -163,6 +164,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     state = self.server.states[repo_name][pull_num]
                     state.head_advanced(head_sha)
                     state.mergeable = None
+
                 elif action in ['opened', 'reopened']:
                     state = PullReqState(pull_num, head_sha, '') # FIXME: status, comments
                     state.title = info['pull_request']['title']
@@ -170,8 +172,18 @@ class RequestHandler(BaseHTTPRequestHandler):
                     state.mergeable = info['pull_request']['mergeable']
 
                     self.server.states[repo_name][pull_num] = state
+
                 elif action == 'closed':
                     del self.server.states[repo_name][pull_num]
+
+                elif action == 'assigned':
+                    state = self.server.states[repo_name][pull_num]
+                    state.assignee = info['pull_request']['assignee']['login']
+
+                elif action == 'unassigned':
+                    state = self.server.states[repo_name][pull_num]
+                    state.assignee = ''
+
                 else:
                     self.server.logger.debug('Invalid pull_request action: {}'.format(action))
 
