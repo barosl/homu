@@ -121,8 +121,11 @@ def start_build(state, repo, repo_cfgs, buildbot_slots, logger):
     except github3.models.GitHubError as e:
         if e.code != 409: raise
 
-        utils.github_create_status(repo, state.head_sha, 'error', '', 'Merge conflict', context='homu')
+        desc = 'Merge conflict'
+        utils.github_create_status(repo, state.head_sha, 'error', '', desc, context='homu')
         state.status = 'error'
+
+        repo.issue(state.num).create_comment(':umbrella: ' + desc)
 
         return False
     else:
@@ -138,6 +141,8 @@ def start_build(state, repo, repo_cfgs, buildbot_slots, logger):
         desc = 'Testing candidate {}...'.format(state.merge_sha)
         utils.github_create_status(repo, state.head_sha, 'pending', '', desc, context='homu')
         state.status = 'pending'
+
+        repo.issue(state.num).create_comment(':hourglass: ' + desc)
 
     return True
 

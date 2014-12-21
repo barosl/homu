@@ -216,8 +216,11 @@ class RequestHandler(BaseHTTPRequestHandler):
                             state.build_res[builder] = True
 
                             if all(state.build_res.values()):
-                                utils.github_create_status(repo, state.head_sha, 'success', url, 'Test successful', context='homu')
+                                desc = 'Test successful'
+                                utils.github_create_status(repo, state.head_sha, 'success', url, desc, context='homu')
                                 state.status = 'success'
+
+                                repo.issue(state.num).create_comment(':sunny: ' + desc)
 
                                 if state.approved_by and not state.try_:
                                     try:
@@ -227,8 +230,11 @@ class RequestHandler(BaseHTTPRequestHandler):
                                             state.merge_sha
                                         )
                                     except github3.models.GitHubError:
-                                        utils.github_create_status(repo, state.head_sha, 'error', url, 'Test was successful, but fast-forwarding failed', context='homu')
+                                        desc = 'Test was successful, but fast-forwarding failed'
+                                        utils.github_create_status(repo, state.head_sha, 'error', url, desc, context='homu')
                                         state.status = 'error'
+
+                                        repo.issue(state.num).create_comment(':eyes: ' + desc)
 
                                 self.server.queue_handler()
 
@@ -236,8 +242,11 @@ class RequestHandler(BaseHTTPRequestHandler):
                             state.build_res[builder] = False
 
                             if state.status == 'pending':
-                                utils.github_create_status(repo, state.head_sha, 'failure', url, 'Test failed', context='homu')
+                                desc = 'Test failed'
+                                utils.github_create_status(repo, state.head_sha, 'failure', url, desc, context='homu')
                                 state.status = 'failure'
+
+                                repo.issue(state.num).create_comment(':broken_heart: ' + desc)
 
                                 self.server.queue_handler()
 
