@@ -8,6 +8,7 @@ import utils
 from socketserver import ThreadingMixIn
 import github3
 import jinja2
+import requests
 
 class RequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -28,7 +29,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     'priority': state.priority,
                     'url': 'https://github.com/{}/{}/pull/{}'.format(repo.owner, repo.name, state.num),
                     'num': state.num,
-                    'approved_by': state.approved_by if state.approved_by else '(empty)',
+                    'approved_by': state.approved_by,
                     'title': state.title,
                     'head_ref': state.head_ref,
                     'mergeable': 'yes' if state.mergeable is True else 'no' if state.mergeable is False else 'unknown',
@@ -39,12 +40,28 @@ class RequestHandler(BaseHTTPRequestHandler):
             resp_text = self.server.tpls['queue'].render(
                 repo_name = repo.name,
                 states = rows,
+                oauth_client_id = self.server.cfg['main']['oauth_client_id'],
             )
 
-        elif self.path.startswith('/rollup/'):
-            repo_name = self.path[len('/rollup/'):]
-            repo = self.server.repos[repo_name]
+        elif self.path.startswith('/rollup'):
+            args = urllib.parse.parse_qs(self.path[self.path.index('?')+1:])
+            code = args['code'][0]
+            state = json.loads(args['state'][0])
+
+            res = requests.post('https://github.com/login/oauth/access_token', data={
+                'client_id': self.server.cfg['main']['oauth_client_id'],
+                'client_secret': self.server.cfg['main']['oauth_client_secret'],
+                'code': code,
+            })
+            args = urllib.parse.parse_qs(res.text)
+            token = args['access_token'][0]
+
+            repo = self.server.repos[state['repo']]
             repo_cfg = self.server.repo_cfgs[repo.name]
+
+            user_gh = github3.login(token=token)
+            user_repo = user_gh.repository(user_gh.user().login, repo.name)
+            base_repo = user_gh.repository(repo.owner.login, repo.name)
 
             rollup_states = [x for x in self.server.states[repo.name].values() if x.rollup and x.approved_by]
 
@@ -55,17 +72,16 @@ class RequestHandler(BaseHTTPRequestHandler):
                 master_sha = repo.ref('heads/' + repo_cfg['master_branch']).object.sha
                 try:
                     utils.github_set_ref(
-                        repo,
+                        user_repo,
                         'heads/' + repo_cfg['rollup_branch'],
                         master_sha,
                         force=True,
                     )
                 except github3.models.GitHubError:
-                    repo.create_ref(
+                    user_repo.create_ref(
                         'refs/heads/' + repo_cfg['rollup_branch'],
                         master_sha,
                     )
-
 
                 successes = []
                 failures = []
@@ -77,7 +93,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                         state.approved_by,
                     )
 
-                    try: repo.merge(repo_cfg['rollup_branch'], state.head_sha, merge_msg)
+                    try: user_repo.merge(repo_cfg['rollup_branch'], state.head_sha, merge_msg)
                     except github3.models.GitHubError as e:
                         if e.code != 409: raise
 
@@ -91,17 +107,19 @@ class RequestHandler(BaseHTTPRequestHandler):
                     ', '.join('#{}'.format(x) for x in failures),
                 )
 
-                [x.close() for x in repo.iter_pulls(head='{}:{}'.format(repo.owner, repo_cfg['rollup_branch']))]
-
-                pull = repo.create_pull(
-                    title,
-                    repo_cfg['master_branch'],
-                    repo_cfg['rollup_branch'],
-                    body,
-                )
-
-                resp_status = 302
-                resp_text = pull.html_url
+                try:
+                    pull = base_repo.create_pull(
+                        title,
+                        repo_cfg['master_branch'],
+                        user_repo.owner.login + ':' + repo_cfg['rollup_branch'],
+                        body,
+                    )
+                except github3.models.GitHubError as e:
+                    resp_status = 200
+                    resp_text = e.response.text
+                else:
+                    resp_status = 302
+                    resp_text = pull.html_url
 
         else:
             resp_status = 404

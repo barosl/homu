@@ -4,6 +4,8 @@ token = ""
 port = 7942
 hmac_key = ""
 buildbot_key = ""
+oauth_client_id = ""
+oauth_client_secret = ""
 
 [[repo]]
 

@@ -24,6 +24,8 @@
     <body>
         <h1>Homu queue - {{repo_name}}</h1>
 
+        <button type="button" id="rollup">Create a rollup</button>
+
         <table>
             <tr>
                 <th>Number</th>
@@ -50,6 +52,17 @@
             {% endfor %}
         </table>
 
-        <button type="button" onclick="if (confirm('A new pull request will be created. Continue?')) location = '../rollup/{{repo_name}}';">Create a rollup</button>
+        <script>
+            document.getElementById('rollup').onclick = function(ev) {
+                if (!confirm('This will create a new pull request. Proceed?')) return;
+
+                location = 'https://github.com/login/oauth/authorize' +
+                    '?client_id={{oauth_client_id}}' +
+                    '&scope=public_repo' +
+                    '&state=' + encodeURIComponent(JSON.stringify({
+                        repo: '{{repo_name}}'
+                    }));
+            };
+        </script>
     </body>
 </html>
