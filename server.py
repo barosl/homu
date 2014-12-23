@@ -168,6 +168,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                         username,
                         repo_cfg['reviewers'],
                         self.server.states[repo_name][pull_num],
+                        self.server.my_username,
                         realtime=True,
                     ):
                         self.server.queue_handler()
@@ -319,7 +320,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     pass
 
-def start(cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots):
+def start(cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots, my_username):
     server = ThreadedHTTPServer(('', cfg['main']['port']), RequestHandler)
 
     tpls = {}
@@ -336,5 +337,6 @@ def start(cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots):
     server.logger = logger
     server.buildbot_slots = buildbot_slots
     server.tpls = tpls
+    server.my_username = my_username
 
     Thread(target=server.serve_forever).start()

@@ -54,9 +54,11 @@ class PullReqState:
     def __lt__(self, other):
         return self.sort_key() < other.sort_key()
 
-def parse_commands(body, username, reviewers, state, *, realtime=False):
+def parse_commands(body, username, reviewers, state, my_username, *, realtime=False):
     if username not in reviewers:
         return
+
+    mentioned = '@' + my_username in body
 
     state_changed = False
 
@@ -76,16 +78,16 @@ def parse_commands(body, username, reviewers, state, *, realtime=False):
             try: state.priority = int(word[len('p='):])
             except ValueError: pass
 
-        elif word == 'retry' and realtime:
+        elif word == 'retry' and realtime and mentioned:
             state.status = ''
 
-        elif word == 'try' and realtime:
+        elif word == 'try' and realtime and mentioned:
             state.try_ = True
 
-        elif word == 'rollup':
+        elif word == 'rollup' and mentioned:
             state.rollup = True
 
-        elif word == 'rollup-':
+        elif word == 'rollup-' and mentioned:
             state.rollup = False
 
         else:
@@ -200,6 +202,7 @@ def main():
     repos = {}
     repo_cfgs = {}
     buildbot_slots = ['']
+    my_username = gh.user().login
 
     queue_handler = lambda: process_queue(states, repos, repo_cfgs, logger, cfg, buildbot_slots)
 
@@ -231,13 +234,14 @@ def main():
                         comment.user.login,
                         repo_cfg['reviewers'],
                         state,
+                        my_username,
                     )
 
             states[repo.name][pull.number] = state
 
     logger.info('Done!')
 
-    server.start(cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots)
+    server.start(cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots, my_username)
 
     Thread(target=fetch_mergeability, args=[states, repos]).start()
 
