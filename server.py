@@ -245,7 +245,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     if found:
                         builder = info['builderName']
                         build_num = info['number']
-                        build_res = info.get('results', 0)
+                        build_succ = 'successful' in info['text'] or info['results'] == 0
 
                         url = '{}/builders/{}/builds/{}'.format(
                             self.server.repo_cfgs[repo.name]['buildbot_url'],
@@ -253,7 +253,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                             build_num,
                         )
 
-                        if build_res == 0:
+                        if build_succ:
                             state.build_res[builder] = True
 
                             if all(state.build_res.values()):
