@@ -195,12 +195,17 @@ class RequestHandler(BaseHTTPRequestHandler):
                     del self.server.states[repo_name][pull_num]
 
                 elif action == 'assigned':
+                    assignee = info['pull_request']['assignee']['login']
+
                     state = self.server.states[repo_name][pull_num]
-                    state.assignee = info['pull_request']['assignee']['login']
+                    state.assignee = assignee
 
                 elif action == 'unassigned':
+                    assignee = info['pull_request']['assignee']['login']
+
                     state = self.server.states[repo_name][pull_num]
-                    state.assignee = ''
+                    if state.assignee == assignee:
+                        state.assignee = ''
 
                 else:
                     self.server.logger.debug('Invalid pull_request action: {}'.format(action))
