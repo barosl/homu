@@ -45,7 +45,7 @@ class PullReqState:
 
     def sort_key(self):
         return [
-            0 if self.mergeable is True else 1,
+            1 if self.mergeable is False else 0,
             0 if self.approved_by else 1,
             -self.priority,
             self.num,
@@ -184,7 +184,7 @@ def fetch_mergeability(states, repos):
         except:
             traceback.print_exc()
 
-        time.sleep(60*10)
+        time.sleep(60)
 
 def main():
     logger = logging.getLogger('homu')
