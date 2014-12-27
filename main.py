@@ -54,7 +54,10 @@ class PullReqState:
     def __lt__(self, other):
         return self.sort_key() < other.sort_key()
 
-def parse_commands(body, username, reviewers, state, my_username, *, realtime=False):
+def sha_cmp(short, full):
+    return len(short) >= 4 and short == full[:len(short)]
+
+def parse_commands(body, username, reviewers, state, my_username, *, realtime=False, sha=''):
     if username not in reviewers:
         return
 
@@ -62,14 +65,23 @@ def parse_commands(body, username, reviewers, state, my_username, *, realtime=Fa
 
     state_changed = False
 
-    for word in re.findall(r'\S+', body):
+    words = re.findall(r'\S+', body)
+    for i, word in enumerate(words):
         found = True
 
         if word in ['r+', 'r=me']:
-            state.approved_by = username
+            if not sha and i+1 < len(words):
+                sha = words[i+1]
+
+            if sha_cmp(sha, state.head_sha):
+                state.approved_by = username
 
         elif word.startswith('r='):
-            state.approved_by = word[len('r='):]
+            if not sha and i+1 < len(words):
+                sha = words[i+1]
+
+            if sha_cmp(sha, state.head_sha):
+                state.approved_by = word[len('r='):]
 
         elif word == 'r-':
             state.approved_by = ''
@@ -235,7 +247,17 @@ def main():
                         repo_cfg['reviewers'],
                         state,
                         my_username,
+                        sha=comment.original_commit_id,
                     )
+
+            for comment in pull.iter_issue_comments():
+                parse_commands(
+                    comment.body,
+                    comment.user.login,
+                    repo_cfg['reviewers'],
+                    state,
+                    my_username,
+                )
 
             states[repo.name][pull.number] = state
 

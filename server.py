@@ -170,6 +170,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                         self.server.states[repo_name][pull_num],
                         self.server.my_username,
                         realtime=True,
+                        sha=original_commit_id,
                     ):
                         self.server.queue_handler()
 
@@ -219,6 +220,24 @@ class RequestHandler(BaseHTTPRequestHandler):
 
                     if state.head_sha == info['before']:
                         state.head_advanced(info['after'])
+
+            elif event_type == 'issue_comment':
+                body = info['comment']['body']
+                username = info['comment']['user']['login']
+                repo_name = info['repository']['name']
+                pull_num = info['issue']['number']
+
+                repo_cfg = self.server.repo_cfgs[repo_name]
+
+                if parse_commands(
+                    body,
+                    username,
+                    repo_cfg['reviewers'],
+                    self.server.states[repo_name][pull_num],
+                    self.server.my_username,
+                    realtime=True,
+                ):
+                    self.server.queue_handler()
 
             resp_status = 200
             resp_text = ''
