@@ -15,6 +15,7 @@ class PullReqState:
     num = 0
     title = ''
     head_ref = ''
+    base_ref = ''
     mergeable = None
     assignee = ''
 
@@ -237,6 +238,7 @@ def main():
             state = PullReqState(pull.number, pull.head.sha, status)
             state.title = pull.title
             state.head_ref = pull.head.repo[0] + ':' + pull.head.ref
+            state.base_ref = pull.base.ref
             state.assignee = pull.assignee.login if pull.assignee else ''
 
             for comment in pull.iter_comments():
