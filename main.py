@@ -13,10 +13,11 @@ import traceback
 
 class PullReqState:
     num = 0
+    priority = 0
+    rollup = False
     title = ''
     head_ref = ''
     base_ref = ''
-    mergeable = None
     assignee = ''
 
     def __init__(self, num, head_sha, status):
@@ -29,12 +30,11 @@ class PullReqState:
     def head_advanced(self, head_sha):
         self.head_sha = head_sha
         self.approved_by = ''
-        self.priority = 0
         self.status = ''
         self.merge_sha = ''
         self.build_res = {}
         self.try_ = False
-        self.rollup = False
+        self.mergeable = None
 
     def __repr__(self):
         return 'PullReqState#{}(approved_by={}, priority={}, status={})'.format(
@@ -172,22 +172,23 @@ def process_queue(states, repos, repo_cfgs, logger, cfg, buildbot_slots):
         repo_states = sorted(states[repo.name].values())
 
         for state in repo_states:
-            if state.status == 'pending':
+            if state.status == 'pending' and not state.try_:
                 break
 
             elif state.status == '' and state.approved_by:
                 if start_build(state, repo, repo_cfgs, buildbot_slots, logger):
-                    break
+                    return
 
-            elif state.status == 'success' and state.try_:
+            elif state.status == 'success' and state.try_ and state.approved_by:
                 state.try_ = False
 
                 if start_build(state, repo, repo_cfgs, buildbot_slots, logger):
-                    break
+                    return
 
         for state in repo_states:
             if state.status == '' and state.try_:
-                start_build(state, repo, repo_cfgs, buildbot_slots, logger)
+                if start_build(state, repo, repo_cfgs, buildbot_slots, logger):
+                    return
 
 def fetch_mergeability(states, repos):
     while True:

@@ -183,7 +183,6 @@ class RequestHandler(BaseHTTPRequestHandler):
                 if action == 'synchronize':
                     state = self.server.states[repo_name][pull_num]
                     state.head_advanced(head_sha)
-                    state.mergeable = None
 
                 elif action in ['opened', 'reopened']:
                     state = PullReqState(pull_num, head_sha, '') # FIXME: status, comments
