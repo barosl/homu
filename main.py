@@ -16,6 +16,7 @@ class PullReqState:
     priority = 0
     rollup = False
     title = ''
+    body = ''
     head_ref = ''
     base_ref = ''
     assignee = ''
@@ -135,10 +136,11 @@ def start_build(state, repo, repo_cfgs, buildbot_slots, logger):
             master_sha,
         )
 
-    merge_msg = 'Merge #{} into {}\n\nApproved-by: {}'.format(
+    merge_msg = 'Auto merge of #{} - {}, r={}\n\n{}'.format(
         state.num,
-        repo_cfg['tmp_branch'],
+        state.head_ref,
         state.approved_by,
+        state.body,
     )
     try: merge_commit = repo.merge(repo_cfg['tmp_branch'], state.head_sha, merge_msg)
     except github3.models.GitHubError as e:
@@ -240,6 +242,7 @@ def main():
 
             state = PullReqState(pull.number, pull.head.sha, status)
             state.title = pull.title
+            state.body = pull.body
             state.head_ref = pull.head.repo[0] + ':' + pull.head.ref
             state.base_ref = pull.base.ref
             state.assignee = pull.assignee.login if pull.assignee else ''

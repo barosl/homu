@@ -87,10 +87,11 @@ class RequestHandler(BaseHTTPRequestHandler):
                 failures = []
 
                 for state in rollup_states:
-                    merge_msg = 'Merge #{} into {}\n\nApproved-by: {}'.format(
+                    merge_msg = 'Rollup merge of #{} - {}, r={}\n\n{}'.format(
                         state.num,
-                        repo_cfg['rollup_branch'],
+                        state.head_ref,
                         state.approved_by,
+                        state.body,
                     )
 
                     try: user_repo.merge(repo_cfg['rollup_branch'], state.head_sha, merge_msg)
@@ -187,6 +188,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 elif action in ['opened', 'reopened']:
                     state = PullReqState(pull_num, head_sha, '') # FIXME: status, comments
                     state.title = info['pull_request']['title']
+                    state.body = info['pull_request']['body']
                     state.head_ref = info['pull_request']['head']['repo']['owner']['login'] + ':' + info['pull_request']['head']['ref']
                     state.base_ref = info['pull_request']['base']['ref']
                     state.mergeable = info['pull_request']['mergeable']
