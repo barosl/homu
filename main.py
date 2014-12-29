@@ -61,9 +61,10 @@ def sha_cmp(short, full):
 
 def parse_commands(body, username, reviewers, state, my_username, *, realtime=False, sha=''):
     if username not in reviewers:
-        return
+        return False
 
     mentioned = '@' + my_username in body
+    if not mentioned: return False
 
     state_changed = False
 
@@ -92,16 +93,16 @@ def parse_commands(body, username, reviewers, state, my_username, *, realtime=Fa
             try: state.priority = int(word[len('p='):])
             except ValueError: pass
 
-        elif word == 'retry' and realtime and mentioned:
+        elif word == 'retry' and realtime:
             state.status = ''
 
-        elif word == 'try' and realtime and mentioned:
+        elif word == 'try' and realtime:
             state.try_ = True
 
-        elif word == 'rollup' and mentioned:
+        elif word == 'rollup':
             state.rollup = True
 
-        elif word == 'rollup-' and mentioned:
+        elif word == 'rollup-':
             state.rollup = False
 
         else:
