@@ -276,14 +276,15 @@ class RequestHandler(BaseHTTPRequestHandler):
                         )
 
                         if build_succ:
-                            state.build_res[builder] = True
+                            state.build_res[builder] = url
 
                             if all(state.build_res.values()):
                                 desc = 'Test successful'
                                 utils.github_create_status(repo, state.head_sha, 'success', url, desc, context='homu')
                                 state.status = 'success'
 
-                                repo.issue(state.num).create_comment(':sunny: ' + desc)
+                                urls = ', '.join('[{}]({})'.format(builder, url) for builder, url in sorted(state.build_res.items()))
+                                repo.issue(state.num).create_comment(':sunny: {} - {}'.format(desc, urls))
 
                                 if state.approved_by and not state.try_:
                                     try:
@@ -309,7 +310,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                                 utils.github_create_status(repo, state.head_sha, 'failure', url, desc, context='homu')
                                 state.status = 'failure'
 
-                                repo.issue(state.num).create_comment(':broken_heart: ' + desc)
+                                repo.issue(state.num).create_comment(':broken_heart: {} - [{}]({})'.format(desc, builder, url))
 
                                 self.server.queue_handler()
 
