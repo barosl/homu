@@ -26,7 +26,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             for state in pull_states:
                 rows.append({
                     'status': state.status if state.status else 'undecided',
-                    'priority': state.priority,
+                    'priority': 'rollup' if state.rollup else state.priority,
                     'url': 'https://github.com/{}/{}/pull/{}'.format(repo.owner, repo.name, state.num),
                     'num': state.num,
                     'approved_by': state.approved_by,
