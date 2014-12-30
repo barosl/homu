@@ -163,7 +163,7 @@ def start_build(state, repo, repo_cfgs, buildbot_slots, logger):
 
         logger.info('Starting build of #{}: {}'.format(state.num, state.merge_sha))
 
-        desc = 'Testing candidate {}...'.format(state.merge_sha)
+        desc = 'Testing commit {:.7} with merge {:.7}...'.format(state.head_sha, state.merge_sha)
         utils.github_create_status(repo, state.head_sha, 'pending', '', desc, context='homu')
         state.status = 'pending'
 
