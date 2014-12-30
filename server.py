@@ -32,7 +32,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     'approved_by': state.approved_by,
                     'title': state.title,
                     'head_ref': state.head_ref,
-                    'mergeable': 'yes' if state.mergeable is True else 'no' if state.mergeable is False else 'unknown',
+                    'mergeable': 'yes' if state.mergeable is True else 'no' if state.mergeable is False else '',
                     'assignee': state.assignee,
                 })
 
@@ -258,13 +258,14 @@ class RequestHandler(BaseHTTPRequestHandler):
 
                     found = False
                     rev = [x[1] for x in info['properties'] if x[0] == 'revision'][0]
-                    for repo in self.server.repos.values():
-                        for state in self.server.states[repo.name].values():
-                            if state.merge_sha == rev:
-                                found = True
-                                break
+                    if rev:
+                        for repo in self.server.repos.values():
+                            for state in self.server.states[repo.name].values():
+                                if state.merge_sha == rev and state.build_res:
+                                    found = True
+                                    break
 
-                        if found: break
+                            if found: break
 
                     if found:
                         builder = info['builderName']
@@ -323,7 +324,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     info = row['payload']['build']
                     rev = [x[1] for x in info['properties'] if x[0] == 'revision'][0]
 
-                    if self.server.buildbot_slots[0] == rev:
+                    if rev and self.server.buildbot_slots[0] == rev:
                         self.server.buildbot_slots[0] = ''
 
                         self.server.queue_handler()
