@@ -186,12 +186,14 @@ class RequestHandler(BaseHTTPRequestHandler):
                     state.head_advanced(head_sha)
 
                 elif action in ['opened', 'reopened']:
-                    state = PullReqState(pull_num, head_sha, '') # FIXME: status, comments
+                    state = PullReqState(pull_num, head_sha, '', self.server.repos[repo_name])
                     state.title = info['pull_request']['title']
                     state.body = info['pull_request']['body']
                     state.head_ref = info['pull_request']['head']['repo']['owner']['login'] + ':' + info['pull_request']['head']['ref']
                     state.base_ref = info['pull_request']['base']['ref']
                     state.mergeable = info['pull_request']['mergeable']
+
+                    # FIXME: Needs to retrieve the status and the comments if the action is reopened
 
                     self.server.states[repo_name][pull_num] = state
 
@@ -287,7 +289,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                                 state.status = 'success'
 
                                 urls = ', '.join('[{}]({})'.format(builder, url) for builder, url in sorted(state.build_res.items()))
-                                repo.issue(state.num).create_comment(':sunny: {} - {}'.format(desc, urls))
+                                state.add_comment(':sunny: {} - {}'.format(desc, urls))
 
                                 if state.approved_by and not state.try_:
                                     try:
@@ -301,7 +303,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                                         utils.github_create_status(repo, state.head_sha, 'error', url, desc, context='homu')
                                         state.status = 'error'
 
-                                        repo.issue(state.num).create_comment(':eyes: ' + desc)
+                                        state.add_comment(':eyes: ' + desc)
 
                                 self.server.queue_handler()
 
@@ -313,7 +315,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                                 utils.github_create_status(repo, state.head_sha, 'failure', url, desc, context='homu')
                                 state.status = 'failure'
 
-                                repo.issue(state.num).create_comment(':broken_heart: {} - [{}]({})'.format(desc, builder, url))
+                                state.add_comment(':broken_heart: {} - [{}]({})'.format(desc, builder, url))
 
                                 self.server.queue_handler()
 

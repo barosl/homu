@@ -21,12 +21,13 @@ class PullReqState:
     base_ref = ''
     assignee = ''
 
-    def __init__(self, num, head_sha, status):
+    def __init__(self, num, head_sha, status, repo):
         self.head_advanced('')
 
         self.num = num
         self.head_sha = head_sha
         self.status = status
+        self.repo = repo
 
     def head_advanced(self, head_sha):
         self.head_sha = head_sha
@@ -57,6 +58,13 @@ class PullReqState:
     def __lt__(self, other):
         return self.sort_key() < other.sort_key()
 
+    def add_comment(self, text):
+        issue = getattr(self, 'issue', None)
+        if not issue:
+            issue = self.issue = self.repo.issue(self.num)
+
+        issue.create_comment(text)
+
 def sha_cmp(short, full):
     return len(short) >= 4 and short == full[:len(short)]
 
@@ -79,6 +87,8 @@ def parse_commands(body, username, reviewers, state, my_username, *, realtime=Fa
 
             if sha_cmp(sha, state.head_sha):
                 state.approved_by = username
+            elif realtime:
+                state.add_comment(':scream_cat: You have a wrong number! Please try again with `{:.4}`.'.format(state.head_sha))
 
         elif word.startswith('r='):
             if not sha and i+1 < len(words):
@@ -86,6 +96,8 @@ def parse_commands(body, username, reviewers, state, my_username, *, realtime=Fa
 
             if sha_cmp(sha, state.head_sha):
                 state.approved_by = word[len('r='):]
+            elif realtime:
+                state.add_comment(':scream_cat: You have a wrong number! Please try again with `{:.4}`.'.format(state.head_sha))
 
         elif word == 'r-':
             state.approved_by = ''
@@ -150,7 +162,7 @@ def start_build(state, repo, repo_cfgs, buildbot_slots, logger):
         utils.github_create_status(repo, state.head_sha, 'error', '', desc, context='homu')
         state.status = 'error'
 
-        repo.issue(state.num).create_comment(':umbrella: ' + desc)
+        state.add_comment(':umbrella: ' + desc)
 
         return False
     else:
@@ -167,7 +179,7 @@ def start_build(state, repo, repo_cfgs, buildbot_slots, logger):
         utils.github_create_status(repo, state.head_sha, 'pending', '', desc, context='homu')
         state.status = 'pending'
 
-        repo.issue(state.num).create_comment(':hourglass: ' + desc)
+        state.add_comment(':hourglass: ' + desc)
 
     return True
 
@@ -240,7 +252,7 @@ def main():
                     status = info.state
                     break
 
-            state = PullReqState(pull.number, pull.head.sha, status)
+            state = PullReqState(pull.number, pull.head.sha, status, repo)
             state.title = pull.title
             state.body = pull.body
             state.head_ref = pull.head.repo[0] + ':' + pull.head.ref
