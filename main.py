@@ -48,6 +48,7 @@ class PullReqState:
 
     def sort_key(self):
         return [
+            0 if self.status == 'pending' else 1,
             1 if self.mergeable is False else 0,
             0 if self.approved_by else 1,
             1 if self.rollup else 0,
