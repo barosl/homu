@@ -7,6 +7,7 @@ import logging
 from threading import Thread
 import time
 import traceback
+import sqlite3
 
 class PullReqState:
     num = 0
@@ -18,13 +19,14 @@ class PullReqState:
     base_ref = ''
     assignee = ''
 
-    def __init__(self, num, head_sha, status, repo):
+    def __init__(self, num, head_sha, status, repo, db):
         self.head_advanced('')
 
         self.num = num
         self.head_sha = head_sha
         self.status = status
         self.repo = repo
+        self.db = db
 
     def head_advanced(self, head_sha):
         self.head_sha = head_sha
@@ -63,10 +65,15 @@ class PullReqState:
 
         issue.create_comment(text)
 
+    def set_status(self, status):
+        self.status = status
+
+        self.db.execute('DELETE FROM state WHERE repo = ? AND num = ?', [self.repo.name, self.num])
+
 def sha_cmp(short, full):
     return len(short) >= 4 and short == full[:len(short)]
 
-def parse_commands(body, username, reviewers, state, my_username, *, realtime=False, sha=''):
+def parse_commands(body, username, reviewers, state, my_username, db, *, realtime=False, sha=''):
     if username not in reviewers:
         return False
 
@@ -86,7 +93,7 @@ def parse_commands(body, username, reviewers, state, my_username, *, realtime=Fa
             if sha_cmp(sha, state.head_sha):
                 state.approved_by = username
             elif realtime:
-                state.add_comment(':scream_cat: You have a wrong number! Please try again with `{:.4}`.'.format(state.head_sha))
+                state.add_comment(':scream_cat: You have the wrong number! Please try again with `{:.4}`.'.format(state.head_sha))
 
         elif word.startswith('r='):
             if not sha and i+1 < len(words):
@@ -95,7 +102,7 @@ def parse_commands(body, username, reviewers, state, my_username, *, realtime=Fa
             if sha_cmp(sha, state.head_sha):
                 state.approved_by = word[len('r='):]
             elif realtime:
-                state.add_comment(':scream_cat: You have a wrong number! Please try again with `{:.4}`.'.format(state.head_sha))
+                state.add_comment(':scream_cat: You have the wrong number! Please try again with `{:.4}`.'.format(state.head_sha))
 
         elif word == 'r-':
             state.approved_by = ''
@@ -105,7 +112,9 @@ def parse_commands(body, username, reviewers, state, my_username, *, realtime=Fa
             except ValueError: pass
 
         elif word == 'retry' and realtime:
-            state.status = ''
+            state.set_status('')
+
+            db.execute('INSERT INTO state (repo, num, retry) VALUES (?, ?, 1)', [state.repo.name, state.num])
 
         elif word == 'try' and realtime:
             state.try_ = True
@@ -124,7 +133,7 @@ def parse_commands(body, username, reviewers, state, my_username, *, realtime=Fa
 
     return state_changed
 
-def start_build(state, repo, repo_cfgs, buildbot_slots, logger):
+def start_build(state, repo, repo_cfgs, buildbot_slots, logger, db):
     if buildbot_slots[0]:
         return True
 
@@ -158,7 +167,7 @@ def start_build(state, repo, repo_cfgs, buildbot_slots, logger):
 
         desc = 'Merge conflict'
         utils.github_create_status(repo, state.head_sha, 'error', '', desc, context='homu')
-        state.status = 'error'
+        state.set_status('error')
 
         state.add_comment(':umbrella: ' + desc)
 
@@ -175,13 +184,15 @@ def start_build(state, repo, repo_cfgs, buildbot_slots, logger):
 
         desc = 'Testing commit {:.7} with merge {:.7}...'.format(state.head_sha, state.merge_sha)
         utils.github_create_status(repo, state.head_sha, 'pending', '', desc, context='homu')
-        state.status = 'pending'
+        state.set_status('pending')
 
         state.add_comment(':hourglass: ' + desc)
 
+        db.execute('INSERT INTO state (repo, num, merge_sha) VALUES (?, ?, ?)', [state.repo.name, state.num, state.merge_sha])
+
     return True
 
-def process_queue(states, repos, repo_cfgs, logger, cfg, buildbot_slots):
+def process_queue(states, repos, repo_cfgs, logger, cfg, buildbot_slots, db):
     for repo in repos.values():
         repo_states = sorted(states[repo.name].values())
 
@@ -190,18 +201,18 @@ def process_queue(states, repos, repo_cfgs, logger, cfg, buildbot_slots):
                 break
 
             elif state.status == '' and state.approved_by:
-                if start_build(state, repo, repo_cfgs, buildbot_slots, logger):
+                if start_build(state, repo, repo_cfgs, buildbot_slots, logger, db):
                     return
 
             elif state.status == 'success' and state.try_ and state.approved_by:
                 state.try_ = False
 
-                if start_build(state, repo, repo_cfgs, buildbot_slots, logger):
+                if start_build(state, repo, repo_cfgs, buildbot_slots, logger, db):
                     return
 
         for state in repo_states:
             if state.status == '' and state.try_:
-                if start_build(state, repo, repo_cfgs, buildbot_slots, logger):
+                if start_build(state, repo, repo_cfgs, buildbot_slots, logger, db):
                     return
 
 def fetch_mergeability(states, repos):
@@ -232,7 +243,16 @@ def main():
     buildbot_slots = ['']
     my_username = gh.user().login
 
-    queue_handler = lambda: process_queue(states, repos, repo_cfgs, logger, cfg, buildbot_slots)
+    db_conn = sqlite3.connect('main.db', check_same_thread=False, isolation_level=None)
+    db = db_conn.cursor()
+
+    db.execute('''CREATE TABLE IF NOT EXISTS state (
+        repo TEXT NOT NULL,
+        num INTEGER NOT NULL,
+        retry INTEGER,
+        merge_sha TEXT,
+        UNIQUE (repo, num)
+    )''')
 
     logger.info('Retrieving pull requests...')
 
@@ -250,7 +270,7 @@ def main():
                     status = info.state
                     break
 
-            state = PullReqState(pull.number, pull.head.sha, status, repo)
+            state = PullReqState(pull.number, pull.head.sha, status, repo, db)
             state.title = pull.title
             state.body = pull.body
             state.head_ref = pull.head.repo[0] + ':' + pull.head.ref
@@ -265,6 +285,7 @@ def main():
                         repo_cfg['reviewers'],
                         state,
                         my_username,
+                        db,
                         sha=comment.original_commit_id,
                     )
 
@@ -275,14 +296,29 @@ def main():
                     repo_cfg['reviewers'],
                     state,
                     my_username,
+                    db,
                 )
 
             states[repo.name][pull.number] = state
 
+    db.execute('SELECT repo, num, retry, merge_sha FROM state')
+    for repo_name, num, retry, merge_sha in db.fetchall():
+        try: state = states[repo_name][num]
+        except KeyError:
+            db.execute('DELETE FROM state WHERE repo = ? AND num = ?', [repo_name, num])
+            continue
+
+        if retry: state.status = ''
+        if merge_sha:
+            state.build_res = {x: None for x in repo_cfgs[repo_name]['builders']}
+            state.merge_sha = merge_sha
+
     logger.info('Done!')
 
+    queue_handler = lambda: process_queue(states, repos, repo_cfgs, logger, cfg, buildbot_slots, db)
+
     from . import server
-    server.start(cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots, my_username)
+    server.start(cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots, my_username, db)
 
     Thread(target=fetch_mergeability, args=[states, repos]).start()
 

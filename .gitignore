@@ -2,3 +2,4 @@
 /.venv/
 /cfg.toml
 /homu.egg-info/
+/main.db

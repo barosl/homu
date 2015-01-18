@@ -171,6 +171,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                         repo_cfg['reviewers'],
                         self.server.states[repo_name][pull_num],
                         self.server.my_username,
+                        self.server.db,
                         realtime=True,
                         sha=original_commit_id,
                     ):
@@ -187,7 +188,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     state.head_advanced(head_sha)
 
                 elif action in ['opened', 'reopened']:
-                    state = PullReqState(pull_num, head_sha, '', self.server.repos[repo_name])
+                    state = PullReqState(pull_num, head_sha, '', self.server.repos[repo_name], self.server.db)
                     state.title = info['pull_request']['title']
                     state.body = info['pull_request']['body']
                     state.head_ref = info['pull_request']['head']['repo']['owner']['login'] + ':' + info['pull_request']['head']['ref']
@@ -242,6 +243,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     repo_cfg['reviewers'],
                     self.server.states[repo_name][pull_num],
                     self.server.my_username,
+                    self.server.db,
                     realtime=True,
                 ):
                     self.server.queue_handler()
@@ -287,7 +289,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                             if all(state.build_res.values()):
                                 desc = 'Test successful'
                                 utils.github_create_status(repo, state.head_sha, 'success', url, desc, context='homu')
-                                state.status = 'success'
+                                state.set_status('success')
 
                                 urls = ', '.join('[{}]({})'.format(builder, url) for builder, url in sorted(state.build_res.items()))
                                 state.add_comment(':sunny: {} - {}'.format(desc, urls))
@@ -302,7 +304,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                                     except github3.models.GitHubError:
                                         desc = 'Test was successful, but fast-forwarding failed'
                                         utils.github_create_status(repo, state.head_sha, 'error', url, desc, context='homu')
-                                        state.status = 'error'
+                                        state.set_status('error')
 
                                         state.add_comment(':eyes: ' + desc)
 
@@ -314,7 +316,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                             if state.status == 'pending':
                                 desc = 'Test failed'
                                 utils.github_create_status(repo, state.head_sha, 'failure', url, desc, context='homu')
-                                state.status = 'failure'
+                                state.set_status('failure')
 
                                 state.add_comment(':broken_heart: {} - [{}]({})'.format(desc, builder, url))
 
@@ -348,7 +350,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     pass
 
-def start(cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots, my_username):
+def start(cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots, my_username, db):
     server = ThreadedHTTPServer(('', cfg['main']['port']), RequestHandler)
 
     tpls = {}
@@ -366,5 +368,6 @@ def start(cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots, 
     server.buildbot_slots = buildbot_slots
     server.tpls = tpls
     server.my_username = my_username
+    server.db = db
 
     Thread(target=server.serve_forever).start()
