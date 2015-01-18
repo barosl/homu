@@ -3,12 +3,13 @@ from threading import Thread
 import hmac
 import json
 import urllib.parse
-from main import PullReqState, parse_commands
-import utils
+from .main import PullReqState, parse_commands
+from . import utils
 from socketserver import ThreadingMixIn
 import github3
 import jinja2
 import requests
+import pkg_resources
 
 class RequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -351,7 +352,7 @@ def start(cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots, 
     server = ThreadedHTTPServer(('', cfg['main']['port']), RequestHandler)
 
     tpls = {}
-    env = jinja2.Environment(loader=jinja2.FileSystemLoader('html'))
+    env = jinja2.Environment(loader=jinja2.FileSystemLoader(pkg_resources.resource_filename(__name__, 'html')))
     tpls['index'] = env.get_template('index.html')
     tpls['queue'] = env.get_template('queue.html')
 

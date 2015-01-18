@@ -1,3 +1,4 @@
-/__pycache__/
+/homu/__pycache__/
 /.venv/
 /cfg.toml
+/homu.egg-info/
