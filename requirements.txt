@@ -1,4 +1,0 @@
-github3.py
-toml
-Jinja2
-requests

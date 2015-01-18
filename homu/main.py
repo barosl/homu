@@ -1,11 +1,8 @@
-#!/usr/bin/env python3
-
 import github3
 import toml
 import json
 import re
-import server
-import utils
+from . import utils
 import logging
 from threading import Thread
 import time
@@ -284,6 +281,7 @@ def main():
 
     logger.info('Done!')
 
+    from . import server
     server.start(cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots, my_username)
 
     Thread(target=fetch_mergeability, args=[states, repos]).start()
