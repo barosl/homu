@@ -266,13 +266,13 @@ class RequestHandler(BaseHTTPRequestHandler):
                     if rev:
                         for repo in self.server.repos.values():
                             for state in self.server.states[repo.name].values():
-                                if state.merge_sha == rev and state.build_res:
+                                if state.merge_sha == rev:
                                     found = True
                                     break
 
                             if found: break
 
-                    if found:
+                    if found and info['builderName'] in state.build_res:
                         builder = info['builderName']
                         build_num = info['number']
                         build_succ = 'successful' in info['text'] or info['results'] == 0
