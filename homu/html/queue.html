@@ -21,6 +21,9 @@
 
             .yes { color: green; }
             .no { color: red; }
+
+            .sorting_asc:after { content: " ▲"; }
+            .sorting_desc:after { content: " ▼"; }
         </style>
     </head>
     <body>
@@ -34,7 +37,7 @@
             <label><input type="checkbox" id="auto_reload">Auto reload</label>
         </p>
 
-        <table>
+        <table id="data">
             <thead>
                 <tr>
                     <th>Number</th>
@@ -63,6 +66,9 @@
                 {% endfor %}
             </tbody>
         </table>
+
+        <script src="//code.jquery.com/jquery-2.1.3.min.js"></script>
+        <script src="//cdn.datatables.net/1.10.4/js/jquery.dataTables.min.js"></script>
 
         <script>
             document.getElementById('rollup').onclick = function(ev) {
@@ -100,6 +106,13 @@
             document.getElementById('auto_reload').checked = localStorage.homu_auto_reload == 'true';
 
             handle_auto_reload();
+
+            $(document).ready(function(){
+                $('#data').DataTable({
+                    paging: false,
+                    order: [],
+                });
+            });
         </script>
     </body>
 </html>
