@@ -68,7 +68,7 @@ class PullReqState:
     def set_status(self, status):
         self.status = status
 
-        self.db.execute('DELETE FROM state WHERE repo = ? AND num = ?', [self.repo.name, self.num])
+        self.db.execute('INSERT OR REPLACE INTO state (repo, num, status) VALUES (?, ?, ?)', [self.repo.name, self.num, self.status])
 
 def sha_cmp(short, full):
     return len(short) >= 4 and short == full[:len(short)]
@@ -113,8 +113,6 @@ def parse_commands(body, username, reviewers, state, my_username, db, *, realtim
 
         elif word == 'retry' and realtime:
             state.set_status('')
-
-            db.execute('INSERT INTO state (repo, num, retry) VALUES (?, ?, 1)', [state.repo.name, state.num])
 
         elif word == 'try' and realtime:
             state.try_ = True
@@ -188,7 +186,7 @@ def start_build(state, repo, repo_cfgs, buildbot_slots, logger, db):
 
         state.add_comment(':hourglass: ' + desc)
 
-        db.execute('INSERT INTO state (repo, num, merge_sha) VALUES (?, ?, ?)', [state.repo.name, state.num, state.merge_sha])
+        db.execute('UPDATE state SET merge_sha = ? WHERE repo = ? AND num = ?', [state.merge_sha, state.repo.name, state.num])
 
     return True
 
@@ -249,7 +247,7 @@ def main():
     db.execute('''CREATE TABLE IF NOT EXISTS state (
         repo TEXT NOT NULL,
         num INTEGER NOT NULL,
-        retry INTEGER,
+        status TEXT NOT NULL,
         merge_sha TEXT,
         UNIQUE (repo, num)
     )''')
@@ -264,11 +262,18 @@ def main():
         repo_cfgs[repo.name] = repo_cfg
 
         for pull in repo.iter_pulls(state='open'):
-            status = ''
-            for info in utils.github_iter_statuses(repo, pull.head.sha):
-                if info.context == 'homu':
-                    status = info.state
-                    break
+            db.execute('SELECT status FROM state WHERE repo = ? AND num = ?', [repo.name, pull.number])
+            row = db.fetchone()
+            if row:
+                status = row[0]
+            else:
+                status = ''
+                for info in utils.github_iter_statuses(repo, pull.head.sha):
+                    if info.context == 'homu':
+                        status = info.state
+                        break
+
+                db.execute('INSERT INTO state (repo, num, status) VALUES (?, ?, ?)', [repo.name, pull.number, status])
 
             state = PullReqState(pull.number, pull.head.sha, status, repo, db)
             state.title = pull.title
@@ -301,14 +306,13 @@ def main():
 
             states[repo.name][pull.number] = state
 
-    db.execute('SELECT repo, num, retry, merge_sha FROM state')
-    for repo_name, num, retry, merge_sha in db.fetchall():
+    db.execute('SELECT repo, num, merge_sha FROM state')
+    for repo_name, num, merge_sha in db.fetchall():
         try: state = states[repo_name][num]
         except KeyError:
             db.execute('DELETE FROM state WHERE repo = ? AND num = ?', [repo_name, num])
             continue
 
-        if retry: state.status = ''
         if merge_sha:
             state.build_res = {x: None for x in repo_cfgs[repo_name]['builders']}
             state.merge_sha = merge_sha
