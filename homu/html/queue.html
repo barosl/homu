@@ -27,7 +27,11 @@
 
         <button type="button" id="rollup">Create a rollup</button>
 
-        <p>{{ total }} total, {{ approved }} approved, {{ rolled_up }} rolled up, {{ failed }} failed</p>
+        <p>
+            {{ total }} total, {{ approved }} approved, {{ rolled_up }} rolled up, {{ failed }} failed
+            /
+            <label><input type="checkbox" id="auto_reload">Auto reload</label>
+        </p>
 
         <table>
             <tr>
@@ -66,6 +70,31 @@
                         repo: '{{repo_name}}'
                     }));
             };
+
+            var handle_auto_reload = function() {
+                var timer_id = null;
+
+                return function() {
+                    clearInterval(timer_id);
+                    timer_id = null;
+
+                    if (localStorage.homu_auto_reload == 'true') {
+                        timer_id = setInterval(function() {
+                            location.reload(true);
+                        }, 1000 * 60 * 2);
+                    }
+                };
+            }();
+
+            document.getElementById('auto_reload').onclick = function(ev) {
+                localStorage.homu_auto_reload = ev.target.checked;
+
+                handle_auto_reload();
+            };
+
+            document.getElementById('auto_reload').checked = localStorage.homu_auto_reload == 'true';
+
+            handle_auto_reload();
         </script>
     </body>
 </html>
