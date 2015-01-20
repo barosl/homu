@@ -6,6 +6,7 @@
         <style>
             h1 { font-size: 20px; }
             h2 { font-size: 16px; }
+            p { font-size: 15px; }
 
             table { border-collapse: collapse; }
             td, th { border: 2px solid white; padding: 5px; font-size: 13px; }
@@ -22,8 +23,10 @@
     </head>
     <body>
         <h1>Homu queue - {{repo_name}}</h1>
-        <div>{{ states|length }} PRs</div>
+
         <button type="button" id="rollup">Create a rollup</button>
+
+        <p>{{ total }} total, {{ approved }} approved, {{ rolled_up }} rolled up, {{ failed }} failed</p>
 
         <table>
             <tr>

@@ -42,6 +42,10 @@ class RequestHandler(BaseHTTPRequestHandler):
                 repo_name = repo.name,
                 states = rows,
                 oauth_client_id = self.server.cfg['main']['oauth_client_id'],
+                total = len(pull_states),
+                approved = len([x for x in pull_states if x.approved_by]),
+                rolled_up = len([x for x in pull_states if x.rollup]),
+                failed = len([x for x in pull_states if x.status == 'failure' or x.status == 'error']),
             )
 
         elif self.path.startswith('/rollup'):
