@@ -6,6 +6,7 @@
         <style>
             h1 { font-size: 20px; }
             h2 { font-size: 16px; }
+            p { font-size: 15px; }
         </style>
     </head>
     <body>
@@ -17,13 +18,15 @@
         <p><a href="queue/{{repo}}">{{repo}}</a></p>
         {% endfor %}
 
+        <hr>
+
         <h2>Homu Cheatsheet</h2>
 
         <p>
             Here's a quick reference for the commands Homu accepts. Commands must be posted as
             comments on the PR they refer to. Comments may include multiple commands. Homu will
             only listen to official reviewers that it is configured to listen to. A comment
-            must mention the bot Homu is configured to use. (e.g. for Rust this is @bors)
+            must mention the GitHub account Homu is configured to use. (e.g. for Rust this is @bors)
         </p>
 
         <ul>
@@ -37,7 +40,7 @@
             <li><code>try</code>: Request that the PR be tested by buildbot, without accepting it</li>
         </ul>
 
-        <h3> Examples </h3>
+        <h3>Examples</h3>
 
         <ul>
             <li><code>@bors r+ 123456 p=1</code></li>
