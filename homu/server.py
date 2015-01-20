@@ -69,6 +69,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             base_repo = user_gh.repository(repo.owner.login, repo.name)
 
             rollup_states = [x for x in self.server.states[repo.name].values() if x.rollup and x.approved_by]
+            rollup_states.sort(key=lambda x: x.num)
 
             if not rollup_states:
                 resp_status = 200
