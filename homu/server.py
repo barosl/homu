@@ -241,16 +241,17 @@ class RequestHandler(BaseHTTPRequestHandler):
 
                 repo_cfg = self.server.repo_cfgs[repo_name]
 
-                if parse_commands(
-                    body,
-                    username,
-                    repo_cfg['reviewers'],
-                    self.server.states[repo_name][pull_num],
-                    self.server.my_username,
-                    self.server.db,
-                    realtime=True,
-                ):
-                    self.server.queue_handler()
+                if 'pull_request' in info['issue'] and pull_num in self.server.states[repo_name]:
+                    if parse_commands(
+                        body,
+                        username,
+                        repo_cfg['reviewers'],
+                        self.server.states[repo_name][pull_num],
+                        self.server.my_username,
+                        self.server.db,
+                        realtime=True,
+                    ):
+                        self.server.queue_handler()
 
             resp_status = 200
             resp_text = ''
