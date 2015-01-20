@@ -9,6 +9,15 @@ import time
 import traceback
 import sqlite3
 
+STATUS_TO_PRIORITY = {
+    'success': 0,
+    'pending': 1,
+    'approved': 2,
+    '': 3,
+    'error': 4,
+    'failure': 5,
+}
+
 class PullReqState:
     num = 0
     priority = 0
@@ -47,9 +56,11 @@ class PullReqState:
 
     def sort_key(self):
         return [
-            0 if self.status == 'pending' else 1,
+            STATUS_TO_PRIORITY.get(
+                'approved' if self.status == '' and self.approved_by else self.status,
+                -1,
+            ),
             1 if self.mergeable is False else 0,
-            0 if self.approved_by else 1,
             1 if self.rollup else 0,
             -self.priority,
             self.num,
