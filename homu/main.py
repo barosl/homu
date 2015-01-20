@@ -93,7 +93,7 @@ def parse_commands(body, username, reviewers, state, my_username, db, *, realtim
             if sha_cmp(sha, state.head_sha):
                 state.approved_by = username
             elif realtime:
-                state.add_comment(':scream_cat: You have the wrong number! Please try again with `{:.4}`.'.format(state.head_sha))
+                state.add_comment(':scream_cat: You have the wrong number! Please try again with `{:.7}`.'.format(state.head_sha))
 
         elif word.startswith('r='):
             if not sha and i+1 < len(words):
@@ -102,7 +102,7 @@ def parse_commands(body, username, reviewers, state, my_username, db, *, realtim
             if sha_cmp(sha, state.head_sha):
                 state.approved_by = word[len('r='):]
             elif realtime:
-                state.add_comment(':scream_cat: You have the wrong number! Please try again with `{:.4}`.'.format(state.head_sha))
+                state.add_comment(':scream_cat: You have the wrong number! Please try again with `{:.7}`.'.format(state.head_sha))
 
         elif word == 'r-':
             state.approved_by = ''
