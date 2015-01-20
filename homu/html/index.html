@@ -6,6 +6,7 @@
         <style>
             h1 { font-size: 20px; }
             h2 { font-size: 16px; }
+            p { font-size: 15px; }
         </style>
     </head>
     <body>
@@ -16,5 +17,35 @@
         {% for repo in repos %}
         <p><a href="queue/{{repo}}">{{repo}}</a></p>
         {% endfor %}
+
+        <hr>
+
+        <h2>Homu Cheatsheet</h2>
+
+        <p>
+            Here's a quick reference for the commands Homu accepts. Commands must be posted as
+            comments on the PR they refer to. Comments may include multiple commands. Homu will
+            only listen to official reviewers that it is configured to listen to. A comment
+            must mention the GitHub account Homu is configured to use. (e.g. for Rust this is @bors)
+        </p>
+
+        <ul>
+            <li><code>r+ SHA</code>: Accept a PR where the last commit has the given SHA prefix</li>
+            <li><code>r=NAME SHA</code>: Accept a PR on the behalf of NAME</li>
+            <li><code>r-</code>: Unacccept a PR</li>
+            <li><code>p=NUMBER</code>: Set the priority of the accepted PR (defaults to 0)</li>
+            <li><code>rollup</code>: Mark the PR as likely to merge without issue, implies <code>p=-1</code></li>
+            <li><code>rollup-</code>: Unmark the PR as <code>rollup</code></li>
+            <li><code>retry</code>: Signal that the PR is not bad, and should be retried by buildbot</li>
+            <li><code>try</code>: Request that the PR be tested by buildbot, without accepting it</li>
+        </ul>
+
+        <h3>Examples</h3>
+
+        <ul>
+            <li><code>@bors r+ 123456 p=1</code></li>
+            <li><code>@bors r=barosl 123456 rollup</code></li>
+            <li><code>@bors retry</code></li>
+        </ul>
     </body>
 </html>
