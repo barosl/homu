@@ -360,7 +360,10 @@ def start(cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots, 
     server = ThreadedHTTPServer(('', cfg['main']['port']), RequestHandler)
 
     tpls = {}
-    env = jinja2.Environment(loader=jinja2.FileSystemLoader(pkg_resources.resource_filename(__name__, 'html')))
+    env = jinja2.Environment(
+        loader = jinja2.FileSystemLoader(pkg_resources.resource_filename(__name__, 'html')),
+        autoescape = True,
+    )
     tpls['index'] = env.get_template('index.html')
     tpls['queue'] = env.get_template('queue.html')
 
