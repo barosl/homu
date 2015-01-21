@@ -57,10 +57,11 @@ class PullReqState:
     def sort_key(self):
         return [
             STATUS_TO_PRIORITY.get(
-                'approved' if self.status == '' and self.approved_by else self.status,
+                'approved' if self.status == '' and self.approved_by and self.mergeable else self.status,
                 -1,
             ),
             1 if self.mergeable is False else 0,
+            0 if self.approved_by else 1,
             1 if self.rollup else 0,
             -self.priority,
             self.num,
