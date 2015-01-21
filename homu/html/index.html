@@ -11,6 +11,7 @@
             h3 { font-size: 16px; }
             p, ul { font-size: 15px; line-height: 150%; }
             code { background-color: #efefef; }
+            .repos { font-size: 18px; line-height: 180%; }
         </style>
     </head>
     <body>
@@ -18,9 +19,11 @@
 
         <h2>Repositories</h2>
 
-        {% for repo in repos %}
-        <p><a href="queue/{{repo}}">{{repo}}</a></p>
-        {% endfor %}
+        <ul class="repos">
+            {% for repo in repos %}
+            <li><a href="queue/{{repo}}">{{repo}}</a></li>
+            {% endfor %}
+        </ul>
 
         <hr>
 
