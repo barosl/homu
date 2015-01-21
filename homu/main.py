@@ -29,7 +29,7 @@ class PullReqState:
     assignee = ''
 
     def __init__(self, num, head_sha, status, repo, db):
-        self.head_advanced('')
+        self.head_advanced('', use_db=False)
 
         self.num = num
         self.head_sha = head_sha
@@ -37,7 +37,7 @@ class PullReqState:
         self.repo = repo
         self.db = db
 
-    def head_advanced(self, head_sha):
+    def head_advanced(self, head_sha, *, use_db=True):
         self.head_sha = head_sha
         self.approved_by = ''
         self.status = ''
@@ -45,6 +45,8 @@ class PullReqState:
         self.build_res = {}
         self.try_ = False
         self.mergeable = None
+
+        if use_db: self.set_status('')
 
     def __repr__(self):
         return 'PullReqState#{}(approved_by={}, priority={}, status={})'.format(
