@@ -336,7 +336,7 @@ def main():
     queue_handler = lambda: process_queue(states, repos, repo_cfgs, logger, cfg, buildbot_slots, db)
 
     from . import server
-    server.start(cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots, my_username, db)
+    Thread(target=server.start, args=[cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots, my_username, db]).start()
 
     Thread(target=fetch_mergeability, args=[states, repos]).start()
 

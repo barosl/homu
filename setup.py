@@ -13,6 +13,8 @@ setup(
         'toml',
         'Jinja2',
         'requests',
+        'bottle',
+        'waitress',
     ],
     package_data={
         'homu': [
