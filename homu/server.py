@@ -184,7 +184,17 @@ def github():
             state.base_ref = info['pull_request']['base']['ref']
             state.mergeable = info['pull_request']['mergeable']
 
-            # FIXME: Needs to retrieve the status and the comments if the action is reopened
+            if action == 'reopened':
+                # FIXME: Review comments are ignored here
+                for comment in g.repos[repo_name].issue(pull_num).iter_comments():
+                    parse_commands(
+                        comment.body,
+                        comment.user.login,
+                        g.repo_cfgs[repo_name]['reviewers'],
+                        state,
+                        g.my_username,
+                        g.db,
+                    )
 
             g.states[repo_name][pull_num] = state
 
