@@ -236,12 +236,17 @@ def github():
 
         repo_cfg = g.repo_cfgs[repo_name]
 
-        if 'pull_request' in info['issue'] and pull_num in g.states[repo_name]:
+        state = g.states[repo_name].get(pull_num)
+
+        if 'pull_request' in info['issue'] and state:
+            state.title = info['issue']['title']
+            state.body = info['issue']['body']
+
             if parse_commands(
                 body,
                 username,
                 repo_cfg['reviewers'],
-                g.states[repo_name][pull_num],
+                state,
                 g.my_username,
                 g.db,
                 realtime=True,
