@@ -12,7 +12,6 @@
             table { border-collapse: collapse; }
             td, th { border: 2px solid white; padding: 5px; font-size: 13px; }
             tr:nth-child(even) { background: #ddd; }
-            button { display: block; margin: 15px 0; }
 
             .success { background-color: #80C0F0; }
             .failure, .error { background-color: #F08080; }
@@ -24,22 +23,33 @@
 
             .sorting_asc:after { content: " ▲"; }
             .sorting_desc:after { content: " ▼"; }
+            .dataTables_filter, .dataTables_info, .dataTables_empty { display: none; }
+            #search { width: 150px; }
+            .hide { display: none; }
+            th { cursor: pointer; }
         </style>
     </head>
     <body>
         <h1>Homu queue - {{repo_name}}</h1>
 
-        <button type="button" id="rollup">Create a rollup</button>
+        <p>
+            <button type="button" id="rollup">Create a rollup</button>
+        </p>
 
         <p>
             {{ total }} total, {{ approved }} approved, {{ rolled_up }} rolled up, {{ failed }} failed
             /
             <label><input type="checkbox" id="auto_reload">Auto reload</label>
+            /
+            <input type="search" id="search" placeholder="Search">
+            /
+            <button type="button" id="reset">Reset</button>
         </p>
 
-        <table id="data">
+        <table id="queue">
             <thead>
                 <tr>
+                    <th class="hide">Sort key</th>
                     <th>Number</th>
                     <th>Status</th>
                     <th>Priority</th>
@@ -54,6 +64,7 @@
             <tbody>
                 {% for state in states %}
                 <tr>
+                    <td class="hide">{{loop.index}}</td>
                     <td><a href="{{state.url}}">{{state.num}}</a></td>
                     <td class="{{state.status}}">{{state.status}}</td>
                     <td>{{state.priority}}</td>
@@ -107,11 +118,25 @@
 
             handle_auto_reload();
 
-            $(document).ready(function(){
-                $('#data').DataTable({
+            $(document).ready(function() {
+                var table = $('#queue').DataTable({
                     paging: false,
                     order: [],
+                    autoWidth: false,
                 });
+
+                var search_el = document.getElementById('search');
+
+                search_el.oninput = function(ev) {
+                    table.search(this.value).draw();
+                };
+
+                document.getElementById('reset').onclick = function(ev) {
+                    search_el.value = '';
+                    table.search('').draw();
+
+                    table.order([0, 'asc']).draw();
+                };
             });
         </script>
     </body>
