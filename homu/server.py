@@ -24,7 +24,7 @@ def queue(repo_name):
     rows = []
     for state in pull_states:
         rows.append({
-            'status': 'approved' if state.status == '' and state.approved_by and state.mergeable else state.status,
+            'status': state.get_status(),
             'priority': 'rollup' if state.rollup else state.priority,
             'url': 'https://github.com/{}/{}/pull/{}'.format(repo.owner, repo.name, state.num),
             'num': state.num,

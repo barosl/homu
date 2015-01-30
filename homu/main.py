@@ -58,10 +58,7 @@ class PullReqState:
 
     def sort_key(self):
         return [
-            STATUS_TO_PRIORITY.get(
-                'approved' if self.status == '' and self.approved_by and self.mergeable else self.status,
-                -1,
-            ),
+            STATUS_TO_PRIORITY.get(self.get_status(), -1),
             1 if self.mergeable is False else 0,
             0 if self.approved_by else 1,
             1 if self.rollup else 0,
@@ -83,6 +80,9 @@ class PullReqState:
         self.status = status
 
         self.db.execute('INSERT OR REPLACE INTO state (repo, num, status) VALUES (?, ?, ?)', [self.repo.name, self.num, self.status])
+
+    def get_status(self):
+        return 'approved' if self.status == '' and self.approved_by and self.mergeable is not False else self.status
 
 def sha_cmp(short, full):
     return len(short) >= 4 and short == full[:len(short)]
