@@ -201,18 +201,11 @@ def github():
         elif action == 'closed':
             del g.states[repo_name][pull_num]
 
-        elif action == 'assigned':
-            assignee = info['pull_request']['assignee']['login']
+        elif action in ['assigned', 'unassigned']:
+            assignee = info['pull_request']['assignee']['login'] if info['pull_request']['assignee'] else ''
 
             state = g.states[repo_name][pull_num]
             state.assignee = assignee
-
-        elif action == 'unassigned':
-            assignee = info['pull_request']['assignee']['login']
-
-            state = g.states[repo_name][pull_num]
-            if state.assignee == assignee:
-                state.assignee = ''
 
         else:
             g.logger.debug('Invalid pull_request action: {}'.format(action))
