@@ -15,8 +15,10 @@ repo = ""
 reviewers = ["barosl"]
 buildbot_url = ""
 builders = ["auto-linux", "auto-mac"]
+try_builders = ["try-linux", "try-mac"]
 
 master_branch = "master"
 buildbot_branch = "auto"
+buildbot_try_branch = "try"
 tmp_branch = "tmp"
 rollup_branch = "rollup"

@@ -120,14 +120,14 @@ def parse_commands(body, username, reviewers, state, my_username, db, *, realtim
         elif word == 'retry' and realtime:
             state.set_status('')
 
-        elif word == 'try' and realtime:
-            state.try_ = True
+        elif word in ['try', 'try-'] and realtime:
+            state.try_ = word == 'try'
 
-        elif word == 'rollup':
-            state.rollup = True
+            state.merge_sha = ''
+            state.build_res = {}
 
-        elif word == 'rollup-':
-            state.rollup = False
+        elif word in ['rollup', 'rollup-']:
+            state.rollup = word == 'rollup'
 
         else:
             found = False
@@ -162,7 +162,7 @@ def start_build(state, repo, repo_cfgs, buildbot_slots, logger, db):
     merge_msg = 'Auto merge of #{} - {}, r={}\n\n{}'.format(
         state.num,
         state.head_ref,
-        state.approved_by,
+        '<try>' if state.try_ else state.approved_by,
         state.body,
     )
     try: merge_commit = repo.merge(repo_cfg['tmp_branch'], state.head_sha, merge_msg)
@@ -177,22 +177,27 @@ def start_build(state, repo, repo_cfgs, buildbot_slots, logger, db):
 
         return False
     else:
-        utils.github_set_ref(repo, 'heads/' + repo_cfg['buildbot_branch'], merge_commit.sha, force=True)
+        branch = repo_cfg['buildbot_try_branch' if state.try_ else 'buildbot_branch']
+        builders = repo_cfgs[repo.name]['try_builders' if state.try_ else 'builders']
 
-        state.build_res = {x: None for x in repo_cfgs[repo.name]['builders']}
+        utils.github_set_ref(repo, 'heads/' + branch, merge_commit.sha, force=True)
+
+        state.build_res = {x: None for x in builders}
         state.merge_sha = merge_commit.sha
 
         buildbot_slots[0] = state.merge_sha
 
-        logger.info('Starting build of #{}: {}'.format(state.num, state.merge_sha))
+        logger.info('Starting build of #{} on {}: {}'.format(state.num, branch, state.merge_sha))
 
-        desc = 'Testing commit {:.7} with merge {:.7}...'.format(state.head_sha, state.merge_sha)
+        desc = '{} commit {:.7} with merge {:.7}...'.format('Trying' if state.try_ else 'Testing', state.head_sha, state.merge_sha)
         utils.github_create_status(repo, state.head_sha, 'pending', '', desc, context='homu')
         state.set_status('pending')
 
         state.add_comment(':hourglass: ' + desc)
 
-        db.execute('UPDATE state SET merge_sha = ? WHERE repo = ? AND num = ?', [state.merge_sha, state.repo.name, state.num])
+        # FIXME: state.try_ should also be saved in the database
+        if not state.try_:
+            db.execute('UPDATE state SET merge_sha = ? WHERE repo = ? AND num = ?', [state.merge_sha, state.repo.name, state.num])
 
     return True
 
@@ -322,6 +327,10 @@ def main():
         if merge_sha:
             state.build_res = {x: None for x in repo_cfgs[repo_name]['builders']}
             state.merge_sha = merge_sha
+
+        elif state.status == 'pending':
+            # FIXME: There might be a better solution
+            state.status = ''
 
     logger.info('Done!')
 
