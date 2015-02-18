@@ -50,7 +50,8 @@
             <thead>
                 <tr>
                     <th class="hide">Sort key</th>
-                    <th>Number</th>
+                    <th><input type="checkbox"></th>
+                    <th>#</th>
                     <th>Status</th>
                     <th>Priority</th>
                     <th>Head ref</th>
@@ -65,6 +66,7 @@
                 {% for state in states %}
                 <tr>
                     <td class="hide">{{loop.index}}</td>
+                    <td><input type="checkbox" data-num="{{state.num}}"></td>
                     <td><a href="{{state.url}}">{{state.num}}</a></td>
                     <td class="{{state.status}}">{{state.status}}{{state.status_ext}}</td>
                     <td>{{state.priority}}</td>
@@ -85,11 +87,19 @@
             document.getElementById('rollup').onclick = function(ev) {
                 if (!confirm('This will create a new pull request. Proceed?')) return;
 
+                var nums = [];
+                var els = document.querySelectorAll('#queue tbody input[type=checkbox]:checked');
+                for (var i=0;i<els.length;i++) {
+                    var num = parseInt(els[i].getAttribute('data-num'));
+                    nums.push(num);
+                }
+
                 location = 'https://github.com/login/oauth/authorize' +
                     '?client_id={{oauth_client_id}}' +
                     '&scope=public_repo' +
                     '&state=' + encodeURIComponent(JSON.stringify({
-                        repo: '{{repo_name}}'
+                        repo: '{{repo_name}}',
+                        nums: nums,
                     }));
             };
 
@@ -138,6 +148,15 @@
                     table.order([0, 'asc']).draw();
                 };
             });
+
+            document.querySelector('#queue thead input[type=checkbox]').onclick = function(ev) {
+                ev.stopPropagation();
+
+                var els = document.querySelectorAll('#queue tbody input[type=checkbox]');
+                for (var i=0;i<els.length;i++) {
+                    els[i].checked = this.checked;
+                }
+            };
         </script>
     </body>
 </html>

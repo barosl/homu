@@ -68,7 +68,12 @@ def rollup():
     user_repo = user_gh.repository(user_gh.user().login, repo.name)
     base_repo = user_gh.repository(repo.owner.login, repo.name)
 
-    rollup_states = [x for x in g.states[repo.name].values() if x.rollup and x.approved_by]
+    nums = state.get('nums', [])
+    if nums:
+        try: rollup_states = [g.states[repo.name][num] for num in nums]
+        except KeyError as e: return 'Invalid PR number: {}'.format(e.args[0])
+    else:
+        rollup_states = [x for x in g.states[repo.name].values() if x.rollup and x.approved_by]
     rollup_states.sort(key=lambda x: x.num)
 
     if not rollup_states:
