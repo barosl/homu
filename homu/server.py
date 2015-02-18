@@ -260,6 +260,8 @@ def buildbot():
         if row['event'] == 'buildFinished':
             info = row['payload']['build']
 
+            if 'retry' in info['text']: continue
+
             found = False
             rev = [x[1] for x in info['properties'] if x[0] == 'revision'][0]
             if rev:
