@@ -25,6 +25,7 @@ def queue(repo_name):
     for state in pull_states:
         rows.append({
             'status': state.get_status(),
+            'status_ext': ' (try)' if state.try_ else '',
             'priority': 'rollup' if state.rollup else state.priority,
             'url': 'https://github.com/{}/{}/pull/{}'.format(repo.owner, repo.name, state.num),
             'num': state.num,
