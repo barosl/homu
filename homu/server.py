@@ -158,7 +158,7 @@ def github():
             if parse_commands(
                 body,
                 username,
-                repo_cfg['reviewers'],
+                repo_cfg,
                 g.states[repo_name][pull_num],
                 g.my_username,
                 g.db,
@@ -191,7 +191,7 @@ def github():
                     parse_commands(
                         comment.body,
                         comment.user.login,
-                        g.repo_cfgs[repo_name]['reviewers'],
+                        g.repo_cfgs[repo_name],
                         state,
                         g.my_username,
                         g.db,
@@ -239,7 +239,7 @@ def github():
             if parse_commands(
                 body,
                 username,
-                repo_cfg['reviewers'],
+                repo_cfg,
                 state,
                 g.my_username,
                 g.db,

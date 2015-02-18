@@ -45,14 +45,15 @@
             <li><code>rollup-</code>: Unmark the PR as <code>rollup</code></li>
             <li><code>retry</code>: Signal that the PR is not bad, and should be retried by buildbot</li>
             <li><code>try</code>: Request that the PR be tested by buildbot, without accepting it</li>
+            <li><code>force</code>: Stop all the builds from the configured builders, and proceed to the next PR</li>
         </ul>
 
         <h3>Examples</h3>
 
         <ul>
-            <li><code>@bors r+ 123456 p=1</code></li>
-            <li><code>@bors r=barosl 123456 rollup</code></li>
-            <li><code>@bors retry</code></li>
+            <li><code>@homu r+ 123456 p=1</code></li>
+            <li><code>@homu r=barosl 123456 rollup</code></li>
+            <li><code>@homu retry</code></li>
         </ul>
     </body>
 </html>

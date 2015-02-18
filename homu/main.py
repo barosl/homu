@@ -8,6 +8,7 @@ from threading import Thread
 import time
 import traceback
 import sqlite3
+import requests
 
 STATUS_TO_PRIORITY = {
     'success': 0,
@@ -87,8 +88,8 @@ class PullReqState:
 def sha_cmp(short, full):
     return len(short) >= 4 and short == full[:len(short)]
 
-def parse_commands(body, username, reviewers, state, my_username, db, *, realtime=False, sha=''):
-    if username not in reviewers:
+def parse_commands(body, username, repo_cfg, state, my_username, db, *, realtime=False, sha=''):
+    if username not in repo_cfg['reviewers']:
         return False
 
     mentioned = '@' + my_username in body
@@ -128,6 +129,31 @@ def parse_commands(body, username, reviewers, state, my_username, db, *, realtim
 
         elif word in ['rollup', 'rollup-']:
             state.rollup = word == 'rollup'
+
+        elif word == 'force' and realtime:
+            sess = requests.Session()
+
+            sess.post(repo_cfg['buildbot_url'] + '/login', allow_redirects=False, data={
+                'username': repo_cfg['buildbot_username'],
+                'passwd': repo_cfg['buildbot_password'],
+            })
+
+            res = sess.post(repo_cfg['buildbot_url'] + '/builders/_selected/stopselected', allow_redirects=False, data={
+                'selected': repo_cfg['builders'],
+                'comments': 'Interrupted by Homu',
+            })
+
+            sess.get(repo_cfg['buildbot_url'] + '/logout', allow_redirects=False)
+
+            err = ''
+            if 'authzfail' in res.text:
+                err = 'Authorization failed'
+            else:
+                mat = re.search('(?s)<div class="error">(.*?)</div>', res.text)
+                if mat: err = mat.group(1).strip()
+
+            if err:
+                state.add_comment(':bomb: Buildbot returned an error: `{}`'.format(err))
 
         else:
             found = False
@@ -298,7 +324,7 @@ def main():
                     parse_commands(
                         comment.body,
                         comment.user.login,
-                        repo_cfg['reviewers'],
+                        repo_cfg,
                         state,
                         my_username,
                         db,
@@ -309,7 +335,7 @@ def main():
                 parse_commands(
                     comment.body,
                     comment.user.login,
-                    repo_cfg['reviewers'],
+                    repo_cfg,
                     state,
                     my_username,
                     db,

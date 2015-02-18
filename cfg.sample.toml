@@ -22,3 +22,6 @@ buildbot_branch = "auto"
 buildbot_try_branch = "try"
 tmp_branch = "tmp"
 rollup_branch = "rollup"
+
+buildbot_username = ""
+buildbot_password = ""
