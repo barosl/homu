@@ -100,23 +100,15 @@ def parse_commands(body, username, reviewers, state, my_username, db, *, realtim
     for i, word in enumerate(words):
         found = True
 
-        if word in ['r+', 'r=me']:
+        if word == 'r+' or word.startswith('r='):
             if not sha and i+1 < len(words):
                 sha = words[i+1]
 
             if sha_cmp(sha, state.head_sha):
-                state.approved_by = username
+                state.approved_by = word[len('r='):] if word.startswith('r=') else username
             elif realtime:
-                state.add_comment(':scream_cat: You have the wrong number! Please try again with `{:.7}`.'.format(state.head_sha))
-
-        elif word.startswith('r='):
-            if not sha and i+1 < len(words):
-                sha = words[i+1]
-
-            if sha_cmp(sha, state.head_sha):
-                state.approved_by = word[len('r='):]
-            elif realtime:
-                state.add_comment(':scream_cat: You have the wrong number! Please try again with `{:.7}`.'.format(state.head_sha))
+                msg = '`{}` is not a valid commit SHA.'.format(sha) if sha else 'No commit SHA found.'
+                state.add_comment(':scream_cat: {} Please try again with `{:.7}`.'.format(msg, state.head_sha))
 
         elif word == 'r-':
             state.approved_by = ''
