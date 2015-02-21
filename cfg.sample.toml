@@ -25,3 +25,5 @@ rollup_branch = "rollup"
 
 buildbot_username = ""
 buildbot_password = ""
+
+travis_token = ""

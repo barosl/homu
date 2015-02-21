@@ -203,15 +203,20 @@ def start_build(state, repo, repo_cfgs, buildbot_slots, logger, db):
 
         return False
     else:
-        branch = repo_cfg['buildbot_try_branch' if state.try_ else 'buildbot_branch']
-        builders = repo_cfgs[repo.name]['try_builders' if state.try_ else 'builders']
+        if 'travis_token' in repo_cfg:
+            branch = repo_cfg['buildbot_branch']
+            builders = ['travis']
+        else:
+            branch = repo_cfg['buildbot_try_branch' if state.try_ else 'buildbot_branch']
+            builders = repo_cfgs[repo.name]['try_builders' if state.try_ else 'builders']
 
         utils.github_set_ref(repo, 'heads/' + branch, merge_commit.sha, force=True)
 
         state.build_res = {x: None for x in builders}
         state.merge_sha = merge_commit.sha
 
-        buildbot_slots[0] = state.merge_sha
+        if 'travis_token' not in repo_cfg:
+            buildbot_slots[0] = state.merge_sha
 
         logger.info('Starting build of #{} on {}: {}'.format(state.num, branch, state.merge_sha))
 
@@ -351,7 +356,12 @@ def main():
             continue
 
         if merge_sha:
-            state.build_res = {x: None for x in repo_cfgs[repo_name]['builders']}
+            if 'travis_token' in repo_cfgs[repo_name]:
+                builders = ['travis']
+            else:
+                builders = repo_cfgs[repo_name]['builders']
+
+            state.build_res = {x: None for x in builders}
             state.merge_sha = merge_sha
 
         elif state.status == 'pending':

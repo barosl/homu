@@ -8,6 +8,7 @@ import jinja2
 import requests
 import pkg_resources
 from bottle import get, post, run, request, redirect, abort, response
+import hashlib
 
 class G: pass
 g = G()
@@ -254,6 +255,36 @@ def github():
 
     return 'OK'
 
+def report_build_res(succ, url, builder, repo, state):
+    if succ:
+        desc = 'Test successful'
+        utils.github_create_status(repo, state.head_sha, 'success', url, desc, context='homu')
+        state.set_status('success')
+
+        urls = ', '.join('[{}]({})'.format(builder, url) for builder, url in sorted(state.build_res.items()))
+        state.add_comment(':sunny: {} - {}'.format(desc, urls))
+
+        if state.approved_by and not state.try_:
+            try:
+                utils.github_set_ref(
+                    repo,
+                    'heads/' + g.repo_cfgs[repo.name]['master_branch'],
+                    state.merge_sha
+                )
+            except github3.models.GitHubError:
+                desc = 'Test was successful, but fast-forwarding failed'
+                utils.github_create_status(repo, state.head_sha, 'error', url, desc, context='homu')
+                state.set_status('error')
+
+                state.add_comment(':eyes: ' + desc)
+
+    else:
+        desc = 'Test failed'
+        utils.github_create_status(repo, state.head_sha, 'failure', url, desc, context='homu')
+        state.set_status('failure')
+
+        state.add_comment(':broken_heart: {} - [{}]({})'.format(desc, builder, url))
+
 @post('/buildbot')
 def buildbot():
     response.content_type = 'text/plain'
@@ -293,43 +324,17 @@ def buildbot():
                     state.build_res[builder] = url
 
                     if all(state.build_res.values()):
-                        desc = 'Test successful'
-                        utils.github_create_status(repo, state.head_sha, 'success', url, desc, context='homu')
-                        state.set_status('success')
-
-                        urls = ', '.join('[{}]({})'.format(builder, url) for builder, url in sorted(state.build_res.items()))
-                        state.add_comment(':sunny: {} - {}'.format(desc, urls))
-
-                        if state.approved_by and not state.try_:
-                            try:
-                                utils.github_set_ref(
-                                    repo,
-                                    'heads/' + g.repo_cfgs[repo.name]['master_branch'],
-                                    state.merge_sha
-                                )
-                            except github3.models.GitHubError:
-                                desc = 'Test was successful, but fast-forwarding failed'
-                                utils.github_create_status(repo, state.head_sha, 'error', url, desc, context='homu')
-                                state.set_status('error')
-
-                                state.add_comment(':eyes: ' + desc)
-
-                        g.queue_handler()
-
+                        report_build_res(build_succ, url, builder, repo, state)
                 else:
                     state.build_res[builder] = False
 
                     if state.status == 'pending':
-                        desc = 'Test failed'
-                        utils.github_create_status(repo, state.head_sha, 'failure', url, desc, context='homu')
-                        state.set_status('failure')
+                        report_build_res(build_succ, url, builder, repo, state)
 
-                        state.add_comment(':broken_heart: {} - [{}]({})'.format(desc, builder, url))
-
-                        g.queue_handler()
+                g.queue_handler()
 
             else:
-                g.logger.debug('Invalid commit from Buildbot: {}'.format(rev))
+                g.logger.debug('Invalid commit ID from Buildbot on {}: {}'.format(info['builderName'], rev))
 
         elif row['event'] == 'buildStarted':
             info = row['payload']['build']
@@ -339,6 +344,41 @@ def buildbot():
                 g.buildbot_slots[0] = ''
 
                 g.queue_handler()
+
+    return 'OK'
+
+@post('/travis')
+def travis():
+    info = json.loads(request.forms.payload)
+
+    if not info['commit']:
+        abort(400, 'Invalid commit ID')
+
+    found = False
+    for repo in g.repos.values():
+        for state in g.states[repo.name].values():
+            if state.merge_sha == info['commit']:
+                found = True
+                break
+
+        if found: break
+
+    token = g.repo_cfgs[repo.name]['travis_token']
+    code = hashlib.sha256(('{}/{}{}'.format(repo.owner, repo.name, token)).encode('utf-8')).hexdigest()
+    if request.headers['Authorization'] != code:
+        abort(400, 'Authorization failed')
+
+    if found and 'travis' in state.build_res:
+        succ = info['result'] == 0
+
+        if succ:
+            state.build_res['travis'] = info['build_url']
+
+        report_build_res(succ, info['build_url'], 'travis', repo, state)
+
+        g.queue_handler()
+    else:
+        g.logger.debug('Invalid commit ID from Travis: {}'.format(info['commit']))
 
     return 'OK'
 
