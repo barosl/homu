@@ -2,7 +2,7 @@
 <html>
     <head>
         <meta charset="utf-8">
-        <title>Homu queue - {{repo_name}}</title>
+        <title>Homu queue - {{repo_label}}</title>
         <style>
             * { font-family: sans-serif; }
             h1 { font-size: 20px; }
@@ -30,7 +30,7 @@
         </style>
     </head>
     <body>
-        <h1>Homu queue - {{repo_name}}</h1>
+        <h1>Homu queue - {{repo_label}}</h1>
 
         <p>
             <button type="button" id="rollup">Create a rollup</button>
@@ -98,7 +98,7 @@
                     '?client_id={{oauth_client_id}}' +
                     '&scope=public_repo' +
                     '&state=' + encodeURIComponent(JSON.stringify({
-                        repo: '{{repo_name}}',
+                        repo_label: '{{repo_label}}',
                         nums: nums,
                     }));
             };

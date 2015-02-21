@@ -29,7 +29,7 @@ class PullReqState:
     base_ref = ''
     assignee = ''
 
-    def __init__(self, num, head_sha, status, repo, db):
+    def __init__(self, num, head_sha, status, repo, db, repo_label):
         self.head_advanced('', use_db=False)
 
         self.num = num
@@ -37,6 +37,7 @@ class PullReqState:
         self.status = status
         self.repo = repo
         self.db = db
+        self.repo_label = repo_label
 
     def head_advanced(self, head_sha, *, use_db=True):
         self.head_sha = head_sha
@@ -80,7 +81,7 @@ class PullReqState:
     def set_status(self, status):
         self.status = status
 
-        self.db.execute('INSERT OR REPLACE INTO state (repo, num, status) VALUES (?, ?, ?)', [self.repo.name, self.num, self.status])
+        self.db.execute('INSERT OR REPLACE INTO state (repo, num, status) VALUES (?, ?, ?)', [self.repo_label, self.num, self.status])
 
     def get_status(self):
         return 'approved' if self.status == '' and self.approved_by and self.mergeable is not False else self.status
@@ -133,17 +134,17 @@ def parse_commands(body, username, repo_cfg, state, my_username, db, *, realtime
         elif word == 'force' and realtime:
             sess = requests.Session()
 
-            sess.post(repo_cfg['buildbot_url'] + '/login', allow_redirects=False, data={
-                'username': repo_cfg['buildbot_username'],
-                'passwd': repo_cfg['buildbot_password'],
+            sess.post(repo_cfg['buildbot']['url'] + '/login', allow_redirects=False, data={
+                'username': repo_cfg['buildbot']['username'],
+                'passwd': repo_cfg['buildbot']['password'],
             })
 
-            res = sess.post(repo_cfg['buildbot_url'] + '/builders/_selected/stopselected', allow_redirects=False, data={
-                'selected': repo_cfg['builders'],
+            res = sess.post(repo_cfg['buildbot']['url'] + '/builders/_selected/stopselected', allow_redirects=False, data={
+                'selected': repo_cfg['buildbot']['builders'],
                 'comments': 'Interrupted by Homu',
             })
 
-            sess.get(repo_cfg['buildbot_url'] + '/logout', allow_redirects=False)
+            sess.get(repo_cfg['buildbot']['url'] + '/logout', allow_redirects=False)
 
             err = ''
             if 'authzfail' in res.text:
@@ -169,19 +170,19 @@ def start_build(state, repo, repo_cfgs, buildbot_slots, logger, db):
 
     assert state.head_sha == repo.pull_request(state.num).head.sha
 
-    repo_cfg = repo_cfgs[repo.name]
+    repo_cfg = repo_cfgs[state.repo_label]
 
-    master_sha = repo.ref('heads/' + repo_cfg['master_branch']).object.sha
+    master_sha = repo.ref('heads/' + repo_cfg.get('branch', {}).get('master', 'master')).object.sha
     try:
         utils.github_set_ref(
             repo,
-            'heads/' + repo_cfg['tmp_branch'],
+            'heads/' + repo_cfg.get('branch', {}).get('tmp', 'tmp'),
             master_sha,
             force=True,
         )
     except github3.models.GitHubError:
         repo.create_ref(
-            'refs/heads/' + repo_cfg['tmp_branch'],
+            'refs/heads/' + repo_cfg.get('branch', {}).get('tmp', 'tmp'),
             master_sha,
         )
 
@@ -191,7 +192,7 @@ def start_build(state, repo, repo_cfgs, buildbot_slots, logger, db):
         '<try>' if state.try_ else state.approved_by,
         state.body,
     )
-    try: merge_commit = repo.merge(repo_cfg['tmp_branch'], state.head_sha, merge_msg)
+    try: merge_commit = repo.merge(repo_cfg.get('branch', {}).get('tmp', 'tmp'), state.head_sha, merge_msg)
     except github3.models.GitHubError as e:
         if e.code != 409: raise
 
@@ -203,19 +204,22 @@ def start_build(state, repo, repo_cfgs, buildbot_slots, logger, db):
 
         return False
     else:
-        if 'travis_token' in repo_cfg:
-            branch = repo_cfg['buildbot_branch']
+        if 'buildbot' in repo_cfg:
+            branch = 'try' if state.try_ else 'auto'
+            branch = repo_cfg.get('branch', {}).get(branch, branch)
+            builders = repo_cfg['buildbot']['try_builders' if state.try_ else 'builders']
+        elif 'travis' in repo_cfg:
+            branch = repo_cfg.get('branch', {}).get('auto', 'auto')
             builders = ['travis']
         else:
-            branch = repo_cfg['buildbot_try_branch' if state.try_ else 'buildbot_branch']
-            builders = repo_cfgs[repo.name]['try_builders' if state.try_ else 'builders']
+            raise RuntimeError('Invalid configuration')
 
         utils.github_set_ref(repo, 'heads/' + branch, merge_commit.sha, force=True)
 
         state.build_res = {x: None for x in builders}
         state.merge_sha = merge_commit.sha
 
-        if 'travis_token' not in repo_cfg:
+        if 'buildbot' in repo_cfg:
             buildbot_slots[0] = state.merge_sha
 
         logger.info('Starting build of #{} on {}: {}'.format(state.num, branch, state.merge_sha))
@@ -228,13 +232,13 @@ def start_build(state, repo, repo_cfgs, buildbot_slots, logger, db):
 
         # FIXME: state.try_ should also be saved in the database
         if not state.try_:
-            db.execute('UPDATE state SET merge_sha = ? WHERE repo = ? AND num = ?', [state.merge_sha, state.repo.name, state.num])
+            db.execute('UPDATE state SET merge_sha = ? WHERE repo = ? AND num = ?', [state.merge_sha, state.repo_label, state.num])
 
     return True
 
-def process_queue(states, repos, repo_cfgs, logger, cfg, buildbot_slots, db):
-    for repo in repos.values():
-        repo_states = sorted(states[repo.name].values())
+def process_queue(states, repos, repo_cfgs, logger, buildbot_slots, db):
+    for repo_label, repo in repos.items():
+        repo_states = sorted(states[repo_label].values())
 
         for state in repo_states:
             if state.status == 'pending' and not state.try_:
@@ -258,8 +262,8 @@ def process_queue(states, repos, repo_cfgs, logger, cfg, buildbot_slots, db):
 def fetch_mergeability(states, repos):
     while True:
         try:
-            for repo in repos.values():
-                for state in states[repo.name].values():
+            for repo_label, repo in repos.items():
+                for state in states[repo_label].values():
                     if state.mergeable is None:
                         state.mergeable = repo.pull_request(state.num).mergeable
         except:
@@ -275,13 +279,14 @@ def main():
     with open('cfg.toml') as fp:
         cfg = toml.loads(fp.read())
 
-    gh = github3.login(token=cfg['main']['token'])
+    gh = github3.login(token=cfg['github']['access_token'])
 
     states = {}
     repos = {}
     repo_cfgs = {}
     buildbot_slots = ['']
     my_username = gh.user().login
+    repo_labels = {}
 
     db_conn = sqlite3.connect('main.db', check_same_thread=False, isolation_level=None)
     db = db_conn.cursor()
@@ -296,15 +301,15 @@ def main():
 
     logger.info('Retrieving pull requests...')
 
-    for repo_cfg in cfg['repo']:
-        repo = gh.repository(repo_cfg['owner'], repo_cfg['repo'])
+    for repo_label, repo_cfg in cfg['repo'].items():
+        repo = gh.repository(repo_cfg['owner'], repo_cfg['name'])
 
-        states[repo.name] = {}
-        repos[repo.name] = repo
-        repo_cfgs[repo.name] = repo_cfg
+        states[repo_label] = {}
+        repos[repo_label] = repo
+        repo_cfgs[repo_label] = repo_cfg
 
         for pull in repo.iter_pulls(state='open'):
-            db.execute('SELECT status FROM state WHERE repo = ? AND num = ?', [repo.name, pull.number])
+            db.execute('SELECT status FROM state WHERE repo = ? AND num = ?', [repo_label, pull.number])
             row = db.fetchone()
             if row:
                 status = row[0]
@@ -315,9 +320,9 @@ def main():
                         status = info.state
                         break
 
-                db.execute('INSERT INTO state (repo, num, status) VALUES (?, ?, ?)', [repo.name, pull.number, status])
+                db.execute('INSERT INTO state (repo, num, status) VALUES (?, ?, ?)', [repo_label, pull.number, status])
 
-            state = PullReqState(pull.number, pull.head.sha, status, repo, db)
+            state = PullReqState(pull.number, pull.head.sha, status, repo, db, repo_label)
             state.title = pull.title
             state.body = pull.body
             state.head_ref = pull.head.repo[0] + ':' + pull.head.ref
@@ -346,20 +351,22 @@ def main():
                     db,
                 )
 
-            states[repo.name][pull.number] = state
+            states[repo_label][pull.number] = state
+
+        repo_labels[repo.owner.login, repo.name] = repo_label
 
     db.execute('SELECT repo, num, merge_sha FROM state')
-    for repo_name, num, merge_sha in db.fetchall():
-        try: state = states[repo_name][num]
+    for repo_label, num, merge_sha in db.fetchall():
+        try: state = states[repo_label][num]
         except KeyError:
-            db.execute('DELETE FROM state WHERE repo = ? AND num = ?', [repo_name, num])
+            db.execute('DELETE FROM state WHERE repo = ? AND num = ?', [repo_label, num])
             continue
 
         if merge_sha:
-            if 'travis_token' in repo_cfgs[repo_name]:
-                builders = ['travis']
+            if 'buildbot' in repo_cfgs[repo_label]:
+                builders = repo_cfgs[repo_label]['buildbot']['builders']
             else:
-                builders = repo_cfgs[repo_name]['builders']
+                builders = ['travis']
 
             state.build_res = {x: None for x in builders}
             state.merge_sha = merge_sha
@@ -370,10 +377,10 @@ def main():
 
     logger.info('Done!')
 
-    queue_handler = lambda: process_queue(states, repos, repo_cfgs, logger, cfg, buildbot_slots, db)
+    queue_handler = lambda: process_queue(states, repos, repo_cfgs, logger, buildbot_slots, db)
 
     from . import server
-    Thread(target=server.start, args=[cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots, my_username, db]).start()
+    Thread(target=server.start, args=[cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots, my_username, db, repo_labels]).start()
 
     Thread(target=fetch_mergeability, args=[states, repos]).start()
 

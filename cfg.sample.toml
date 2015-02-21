@@ -1,29 +1,44 @@
-[main]
+[github]
 
-token = ""
-port = 7942
-hmac_key = ""
-buildbot_key = ""
-oauth_client_id = ""
-oauth_client_secret = ""
+access_token = ""
 
-[[repo]]
+app_client_id = ""
+app_client_secret = ""
+
+[web]
+
+port = 54856
+
+[repo.test]
 
 owner = ""
-repo = ""
+name = ""
 
-reviewers = ["barosl"]
-buildbot_url = ""
-builders = ["auto-linux", "auto-mac"]
-try_builders = ["try-linux", "try-mac"]
+reviewers = ["barosl", "graydon"]
 
-master_branch = "master"
-buildbot_branch = "auto"
-buildbot_try_branch = "try"
-tmp_branch = "tmp"
-rollup_branch = "rollup"
+#[repo.test.branch]
+#
+#master = "master"
+#auto = "auto"
+#try = "try"
+#tmp = "tmp"
+#rollup = "rollup"
 
-buildbot_username = ""
-buildbot_password = ""
+[repo.test.github]
 
-travis_token = ""
+secret = ""
+
+#[repo.test.buildbot]
+#
+#url = ""
+#secret = ""
+#
+#builders = ["auto-linux", "auto-mac"]
+#try_builders = ["try-linux", "try-mac"]
+#
+#username = ""
+#password = ""
+
+#[repo.test.travis]
+#
+#token = ""
