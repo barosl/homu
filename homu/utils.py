@@ -1,11 +1,16 @@
 import json
 import github3
 
-def github_set_ref(repo, ref, sha, *, force=False):
+def github_set_ref(repo, ref, sha, *, force=False, auto_create=True):
     url = repo._build_url('git', 'refs', ref, base_url=repo._api)
     data = {'sha': sha, 'force': force}
 
-    js = repo._json(repo._patch(url, data=json.dumps(data)), 200)
+    try: js = repo._json(repo._patch(url, data=json.dumps(data)), 200)
+    except github3.models.GitHubError as e:
+        if e.code == 422 and auto_create:
+            return repo.create_ref('refs/' + ref, sha)
+        else:
+            raise
 
     return github3.git.Reference(js, repo) if js else None
 

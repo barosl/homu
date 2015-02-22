@@ -173,18 +173,12 @@ def start_build(state, repo, repo_cfgs, buildbot_slots, logger, db):
     repo_cfg = repo_cfgs[state.repo_label]
 
     master_sha = repo.ref('heads/' + repo_cfg.get('branch', {}).get('master', 'master')).object.sha
-    try:
-        utils.github_set_ref(
-            repo,
-            'heads/' + repo_cfg.get('branch', {}).get('tmp', 'tmp'),
-            master_sha,
-            force=True,
-        )
-    except github3.models.GitHubError:
-        repo.create_ref(
-            'refs/heads/' + repo_cfg.get('branch', {}).get('tmp', 'tmp'),
-            master_sha,
-        )
+    utils.github_set_ref(
+        repo,
+        'heads/' + repo_cfg.get('branch', {}).get('tmp', 'tmp'),
+        master_sha,
+        force=True,
+    )
 
     merge_msg = 'Auto merge of #{} - {}, r={}\n\n{}'.format(
         state.num,

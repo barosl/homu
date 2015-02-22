@@ -82,18 +82,12 @@ def rollup():
         return 'No pull requests are marked as rollup'
 
     master_sha = repo.ref('heads/' + repo_cfg.get('branch', {}).get('master', 'master')).object.sha
-    try:
-        utils.github_set_ref(
-            user_repo,
-            'heads/' + repo_cfg.get('branch', {}).get('rollup', 'rollup'),
-            master_sha,
-            force=True,
-        )
-    except github3.models.GitHubError:
-        user_repo.create_ref(
-            'refs/heads/' + repo_cfg.get('branch', {}).get('rollup', 'rollup'),
-            master_sha,
-        )
+    utils.github_set_ref(
+        user_repo,
+        'heads/' + repo_cfg.get('branch', {}).get('rollup', 'rollup'),
+        master_sha,
+        force=True,
+    )
 
     successes = []
     failures = []
@@ -284,8 +278,8 @@ def report_build_res(succ, url, builder, repo_label, repo, state):
                         'heads/' + g.repo_cfgs[repo_label].get('branch', {}).get('master', 'master'),
                         state.merge_sha
                     )
-                except github3.models.GitHubError:
-                    desc = 'Test was successful, but fast-forwarding failed'
+                except github3.models.GitHubError as e:
+                    desc = 'Test was successful, but fast-forwarding failed: {}'.format(e)
                     utils.github_create_status(repo, state.head_sha, 'error', url, desc, context='homu')
                     state.set_status('error')
 
