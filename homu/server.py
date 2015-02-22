@@ -193,25 +193,32 @@ def github():
             state.base_ref = info['pull_request']['base']['ref']
             state.mergeable = info['pull_request']['mergeable']
 
+            found = False
+
             if action == 'reopened':
                 # FIXME: Review comments are ignored here
                 for comment in g.repos[repo_label].issue(pull_num).iter_comments():
-                    parse_commands(
+                    found = parse_commands(
                         comment.body,
                         comment.user.login,
                         repo_cfg,
                         state,
                         g.my_username,
                         g.db,
-                    )
+                    ) or found
 
             g.states[repo_label][pull_num] = state
+
+            if found:
+                g.queue_handler()
 
         elif action == 'closed':
             del g.states[repo_label][pull_num]
 
             g.db.execute('DELETE FROM state WHERE repo = ? AND num = ?', [repo_label, pull_num])
             g.db.execute('DELETE FROM build_res WHERE repo = ? AND num = ?', [repo_label, pull_num])
+
+            g.queue_handler()
 
         elif action in ['assigned', 'unassigned']:
             assignee = info['pull_request']['assignee']['login'] if info['pull_request']['assignee'] else ''
