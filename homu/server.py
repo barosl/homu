@@ -257,34 +257,42 @@ def github():
     return 'OK'
 
 def report_build_res(succ, url, builder, repo_label, repo, state):
+    res = url if succ else False
+    state.build_res[builder] = res
+    g.db.execute('INSERT OR REPLACE INTO build_res (repo, num, builder, res) VALUES (?, ?, ?, ?)', [repo_label, state.num, builder, json.dumps(res)])
+
     if succ:
-        desc = 'Test successful'
-        utils.github_create_status(repo, state.head_sha, 'success', url, desc, context='homu')
-        state.set_status('success')
+        if all(state.build_res.values()):
+            desc = 'Test successful'
+            utils.github_create_status(repo, state.head_sha, 'success', url, desc, context='homu')
+            state.set_status('success')
 
-        urls = ', '.join('[{}]({})'.format(builder, url) for builder, url in sorted(state.build_res.items()))
-        state.add_comment(':sunny: {} - {}'.format(desc, urls))
+            urls = ', '.join('[{}]({})'.format(builder, url) for builder, url in sorted(state.build_res.items()))
+            state.add_comment(':sunny: {} - {}'.format(desc, urls))
 
-        if state.approved_by and not state.try_:
-            try:
-                utils.github_set_ref(
-                    repo,
-                    'heads/' + g.repo_cfgs[repo_label].get('branch', {}).get('master', 'master'),
-                    state.merge_sha
-                )
-            except github3.models.GitHubError:
-                desc = 'Test was successful, but fast-forwarding failed'
-                utils.github_create_status(repo, state.head_sha, 'error', url, desc, context='homu')
-                state.set_status('error')
+            if state.approved_by and not state.try_:
+                try:
+                    utils.github_set_ref(
+                        repo,
+                        'heads/' + g.repo_cfgs[repo_label].get('branch', {}).get('master', 'master'),
+                        state.merge_sha
+                    )
+                except github3.models.GitHubError:
+                    desc = 'Test was successful, but fast-forwarding failed'
+                    utils.github_create_status(repo, state.head_sha, 'error', url, desc, context='homu')
+                    state.set_status('error')
 
-                state.add_comment(':eyes: ' + desc)
+                    state.add_comment(':eyes: ' + desc)
 
     else:
-        desc = 'Test failed'
-        utils.github_create_status(repo, state.head_sha, 'failure', url, desc, context='homu')
-        state.set_status('failure')
+        if state.status == 'pending':
+            desc = 'Test failed'
+            utils.github_create_status(repo, state.head_sha, 'failure', url, desc, context='homu')
+            state.set_status('failure')
 
-        state.add_comment(':broken_heart: {} - [{}]({})'.format(desc, builder, url))
+            state.add_comment(':broken_heart: {} - [{}]({})'.format(desc, builder, url))
+
+    g.queue_handler()
 
 @post('/buildbot')
 def buildbot():
@@ -325,20 +333,7 @@ def buildbot():
                     build_num,
                 )
 
-                if build_succ:
-                    state.build_res[builder] = url
-                    g.db.execute('INSERT OR REPLACE INTO build_res (repo, num, builder, res) VALUES (?, ?, ?, ?)', [repo_label, state.num, builder, json.dumps(url)])
-
-                    if all(state.build_res.values()):
-                        report_build_res(build_succ, url, builder, repo_label, repo, state)
-                else:
-                    state.build_res[builder] = False
-                    g.db.execute('INSERT OR REPLACE INTO build_res (repo, num, builder, res) VALUES (?, ?, ?, ?)', [repo_label, state.num, builder, json.dumps(False)])
-
-                    if state.status == 'pending':
-                        report_build_res(build_succ, url, builder, repo_label, repo, state)
-
-                g.queue_handler()
+                report_build_res(build_succ, url, builder, repo_label, repo, state)
 
             else:
                 g.logger.debug('Invalid commit ID from Buildbot on {}: {}'.format(info['builderName'], rev))
@@ -380,12 +375,8 @@ def travis():
 
         succ = info['result'] == 0
 
-        if succ:
-            state.build_res['travis'] = info['build_url']
-
         report_build_res(succ, info['build_url'], 'travis', repo_label, repo, state)
 
-        g.queue_handler()
     else:
         g.logger.debug('Invalid commit ID from Travis: {}'.format(info['commit']))
 
