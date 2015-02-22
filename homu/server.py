@@ -210,6 +210,9 @@ def github():
         elif action == 'closed':
             del g.states[repo_label][pull_num]
 
+            g.db.execute('DELETE FROM state WHERE repo = ? AND num = ?', [repo_label, pull_num])
+            g.db.execute('DELETE FROM build_res WHERE repo = ? AND num = ?', [repo_label, pull_num])
+
         elif action in ['assigned', 'unassigned']:
             assignee = info['pull_request']['assignee']['login'] if info['pull_request']['assignee'] else ''
 
@@ -324,11 +327,13 @@ def buildbot():
 
                 if build_succ:
                     state.build_res[builder] = url
+                    g.db.execute('INSERT OR REPLACE INTO build_res (repo, num, builder, res) VALUES (?, ?, ?, ?)', [repo_label, state.num, builder, json.dumps(url)])
 
                     if all(state.build_res.values()):
                         report_build_res(build_succ, url, builder, repo_label, repo, state)
                 else:
                     state.build_res[builder] = False
+                    g.db.execute('INSERT OR REPLACE INTO build_res (repo, num, builder, res) VALUES (?, ?, ?, ?)', [repo_label, state.num, builder, json.dumps(False)])
 
                     if state.status == 'pending':
                         report_build_res(build_succ, url, builder, repo_label, repo, state)

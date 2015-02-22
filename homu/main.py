@@ -299,6 +299,14 @@ def main():
         UNIQUE (repo, num)
     )''')
 
+    db.execute('''CREATE TABLE IF NOT EXISTS build_res (
+        repo TEXT NOT NULL,
+        num INTEGER NOT NULL,
+        builder TEXT NOT NULL,
+        res TEXT NOT NULL,
+        UNIQUE (repo, num, builder)
+    )''')
+
     logger.info('Retrieving pull requests...')
 
     for repo_label, repo_cfg in cfg['repo'].items():
@@ -374,6 +382,16 @@ def main():
         elif state.status == 'pending':
             # FIXME: There might be a better solution
             state.status = ''
+
+    db.execute('SELECT repo, num, builder, res FROM build_res')
+    for repo_label, num, builder, res in db.fetchall():
+        try: state = states[repo_label][num]
+        except KeyError:
+            db.execute('DELETE FROM build_res WHERE repo = ? AND num = ? AND builder = ?', [repo_label, num, builder])
+            continue
+
+        if builder in state.build_res:
+            state.build_res[builder] = json.loads(res)
 
     logger.info('Done!')
 
