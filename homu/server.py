@@ -180,12 +180,13 @@ def github():
             state.head_advanced(head_sha)
 
         elif action in ['opened', 'reopened']:
-            state = PullReqState(pull_num, head_sha, '', g.repos[repo_label], g.db, repo_label)
+            state = PullReqState(pull_num, head_sha, '', g.repos[repo_label], g.db, repo_label, g.mergeable_que)
             state.title = info['pull_request']['title']
             state.body = info['pull_request']['body']
             state.head_ref = info['pull_request']['head']['repo']['owner']['login'] + ':' + info['pull_request']['head']['ref']
             state.base_ref = info['pull_request']['base']['ref']
-            state.mergeable = info['pull_request']['mergeable']
+            state.set_mergeable(info['pull_request']['mergeable'])
+            state.assignee = info['pull_request']['assignee']['login'] if info['pull_request']['assignee'] else ''
 
             found = False
 
@@ -211,14 +212,13 @@ def github():
 
             g.db.execute('DELETE FROM state WHERE repo = ? AND num = ?', [repo_label, pull_num])
             g.db.execute('DELETE FROM build_res WHERE repo = ? AND num = ?', [repo_label, pull_num])
+            g.db.execute('DELETE FROM mergeable WHERE repo = ? AND num = ?', [repo_label, pull_num])
 
             g.queue_handler()
 
         elif action in ['assigned', 'unassigned']:
-            assignee = info['pull_request']['assignee']['login'] if info['pull_request']['assignee'] else ''
-
             state = g.states[repo_label][pull_num]
-            state.assignee = assignee
+            state.assignee = info['pull_request']['assignee']['login'] if info['pull_request']['assignee'] else ''
 
         else:
             g.logger.debug('Invalid pull_request action: {}'.format(action))
@@ -228,7 +228,10 @@ def github():
 
         for state in g.states[repo_label].values():
             if state.base_ref == ref:
-                state.mergeable = None
+                state.set_mergeable(None, cause={
+                    'sha': info['head_commit']['id'],
+                    'title': info['head_commit']['message'].splitlines()[0],
+                })
 
             if state.head_sha == info['before']:
                 state.head_advanced(info['after'])
@@ -383,7 +386,7 @@ def travis():
 
     return 'OK'
 
-def start(cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots, my_username, db, repo_labels):
+def start(cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots, my_username, db, repo_labels, mergeable_que):
     env = jinja2.Environment(
         loader = jinja2.FileSystemLoader(pkg_resources.resource_filename(__name__, 'html')),
         autoescape = True,
@@ -403,5 +406,6 @@ def start(cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots, 
     g.my_username = my_username
     g.db = db
     g.repo_labels = repo_labels
+    g.mergeable_que = mergeable_que
 
     run(host='', port=cfg['web']['port'], server='waitress')

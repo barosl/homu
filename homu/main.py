@@ -29,7 +29,7 @@ class PullReqState:
     base_ref = ''
     assignee = ''
 
-    def __init__(self, num, head_sha, status, repo, db, repo_label):
+    def __init__(self, num, head_sha, status, repo, db, repo_label, mergeable_que):
         self.head_advanced('', use_db=False)
 
         self.num = num
@@ -38,6 +38,7 @@ class PullReqState:
         self.repo = repo
         self.db = db
         self.repo_label = repo_label
+        self.mergeable_que = mergeable_que
 
     def head_advanced(self, head_sha, *, use_db=True):
         self.head_sha = head_sha
@@ -48,7 +49,9 @@ class PullReqState:
         self.try_ = False
         self.mergeable = None
 
-        if use_db: self.set_status('')
+        if use_db:
+            self.set_status('')
+            self.set_mergeable(None)
 
     def __repr__(self):
         return 'PullReqState#{}(approved_by={}, priority={}, status={})'.format(
@@ -85,6 +88,17 @@ class PullReqState:
 
     def get_status(self):
         return 'approved' if self.status == '' and self.approved_by and self.mergeable is not False else self.status
+
+    def set_mergeable(self, mergeable, *, cause=None, que=True):
+        if mergeable is not None:
+            self.mergeable = mergeable
+
+            self.db.execute('INSERT OR REPLACE INTO mergeable (repo, num, mergeable) VALUES (?, ?, ?)', [self.repo_label, self.num, self.mergeable])
+        else:
+            if que:
+                self.mergeable_que.append([self, cause])
+
+            self.db.execute('DELETE FROM mergeable WHERE repo = ? AND num = ?', [self.repo_label, self.num])
 
 def sha_cmp(short, full):
     return len(short) >= 4 and short == full[:len(short)]
@@ -194,7 +208,7 @@ def start_build(state, repo, repo_cfgs, buildbot_slots, logger, db):
         utils.github_create_status(repo, state.head_sha, 'error', '', desc, context='homu')
         state.set_status('error')
 
-        state.add_comment(':umbrella: ' + desc)
+        state.add_comment(':lock: ' + desc)
 
         return False
     else:
@@ -253,17 +267,35 @@ def process_queue(states, repos, repo_cfgs, logger, buildbot_slots, db):
                 if start_build(state, repo, repo_cfgs, buildbot_slots, logger, db):
                     return
 
-def fetch_mergeability(states, repos):
+def fetch_mergeability(mergeable_que):
+    re_pull_num = re.compile('(?i)merge (?:of|pull request) #([0-9]+)')
+
     while True:
         try:
-            for repo_label, repo in repos.items():
-                for state in states[repo_label].values():
-                    if state.mergeable is None:
-                        state.mergeable = repo.pull_request(state.num).mergeable
+            while mergeable_que:
+                state, cause = mergeable_que.pop()
+
+                mergeable = state.repo.pull_request(state.num).mergeable
+
+                if state.mergeable is True and mergeable is False:
+                    if cause:
+                        mat = re_pull_num.search(cause['title'])
+
+                        if mat: issue_or_commit = '#' + mat.group(1)
+                        else: issue_or_commit = cause['sha'][:7]
+                    else:
+                        issue_or_commit = ''
+
+                    state.add_comment(':umbrella: The latest upstream changes{} made this pull request unmergeable. Please resolve the merge conflicts.'.format(
+                        ' (presumably {})'.format(issue_or_commit) if issue_or_commit else '',
+                    ))
+
+                state.set_mergeable(mergeable, que=False)
+
         except:
             traceback.print_exc()
 
-        time.sleep(60)
+        time.sleep(10)
 
 def main():
     logger = logging.getLogger('homu')
@@ -281,6 +313,7 @@ def main():
     buildbot_slots = ['']
     my_username = gh.user().login
     repo_labels = {}
+    mergeable_que = []
 
     db_conn = sqlite3.connect('main.db', check_same_thread=False, isolation_level=None)
     db = db_conn.cursor()
@@ -299,6 +332,13 @@ def main():
         builder TEXT NOT NULL,
         res TEXT NOT NULL,
         UNIQUE (repo, num, builder)
+    )''')
+
+    db.execute('''CREATE TABLE IF NOT EXISTS mergeable (
+        repo TEXT NOT NULL,
+        num INTEGER NOT NULL,
+        mergeable INTEGER NOT NULL,
+        UNIQUE (repo, num)
     )''')
 
     logger.info('Retrieving pull requests...')
@@ -324,11 +364,12 @@ def main():
 
                 db.execute('INSERT INTO state (repo, num, status) VALUES (?, ?, ?)', [repo_label, pull.number, status])
 
-            state = PullReqState(pull.number, pull.head.sha, status, repo, db, repo_label)
+            state = PullReqState(pull.number, pull.head.sha, status, repo, db, repo_label, mergeable_que)
             state.title = pull.title
             state.body = pull.body
             state.head_ref = pull.head.repo[0] + ':' + pull.head.ref
             state.base_ref = pull.base.ref
+            state.set_mergeable(None)
             state.assignee = pull.assignee.login if pull.assignee else ''
 
             for comment in pull.iter_comments():
@@ -387,14 +428,23 @@ def main():
         if builder in state.build_res:
             state.build_res[builder] = json.loads(res)
 
+    db.execute('SELECT repo, num, mergeable FROM mergeable')
+    for repo_label, num, mergeable in db.fetchall():
+        try: state = states[repo_label][num]
+        except KeyError:
+            db.execute('DELETE FROM mergeable WHERE repo = ? AND num = ?', [repo_label, num])
+            continue
+
+        state.mergeable = bool(mergeable) if mergeable is not None else None
+
     logger.info('Done!')
 
     queue_handler = lambda: process_queue(states, repos, repo_cfgs, logger, buildbot_slots, db)
 
     from . import server
-    Thread(target=server.start, args=[cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots, my_username, db, repo_labels]).start()
+    Thread(target=server.start, args=[cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots, my_username, db, repo_labels, mergeable_que]).start()
 
-    Thread(target=fetch_mergeability, args=[states, repos]).start()
+    Thread(target=fetch_mergeability, args=[mergeable_que]).start()
 
     queue_handler()
 
