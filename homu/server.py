@@ -85,7 +85,8 @@ def rollup():
         try: rollup_states = [g.states[repo_label][num] for num in nums]
         except KeyError as e: return 'Invalid PR number: {}'.format(e.args[0])
     else:
-        rollup_states = [x for x in g.states[repo_label].values() if x.rollup and x.approved_by]
+        rollup_states = [x for x in g.states[repo_label].values() if x.rollup]
+    rollup_states = [x for x in rollup_states if x.approved_by]
     rollup_states.sort(key=lambda x: x.num)
 
     if not rollup_states:

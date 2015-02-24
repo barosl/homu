@@ -42,7 +42,6 @@
             <label><input type="checkbox" id="auto_reload">Auto reload</label>
             /
             <input type="search" id="search" placeholder="Search">
-            /
             <button type="button" id="reset">Reset</button>
         </p>
 
@@ -133,6 +132,9 @@
                     paging: false,
                     order: [],
                     autoWidth: false,
+                    columnDefs: [
+                        {targets: [1], orderable: false, searchable: false},
+                    ],
                 });
 
                 var search_el = document.getElementById('search');
