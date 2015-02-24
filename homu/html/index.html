@@ -33,7 +33,7 @@
             Here's a quick reference for the commands Homu accepts. Commands must be posted as
             comments on the PR they refer to. Comments may include multiple commands. Homu will
             only listen to official reviewers that it is configured to listen to. A comment
-            must mention the GitHub account Homu is configured to use. (e.g. for Rust this is @bors)
+            must mention the GitHub account Homu is configured to use. (e.g. for the Rust project this is @bors)
         </p>
 
         <ul>
@@ -46,6 +46,7 @@
             <li><code>retry</code>: Signal that the PR is not bad, and should be retried by buildbot</li>
             <li><code>try</code>: Request that the PR be tested by buildbot, without accepting it</li>
             <li><code>force</code>: Stop all the builds from the configured builders, and proceed to the next PR</li>
+            <li><code>clean</code>: Clean the previous build results</li>
         </ul>
 
         <h3>Examples</h3>

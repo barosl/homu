@@ -9,6 +9,7 @@ import time
 import traceback
 import sqlite3
 import requests
+from contextlib import contextmanager
 
 STATUS_TO_PRIORITY = {
     'success': 0,
@@ -18,6 +19,19 @@ STATUS_TO_PRIORITY = {
     'error': 4,
     'failure': 5,
 }
+
+@contextmanager
+def buildbot_sess(repo_cfg):
+    sess = requests.Session()
+
+    sess.post(repo_cfg['buildbot']['url'] + '/login', allow_redirects=False, data={
+        'username': repo_cfg['buildbot']['username'],
+        'passwd': repo_cfg['buildbot']['password'],
+    })
+
+    yield sess
+
+    sess.get(repo_cfg['buildbot']['url'] + '/logout', allow_redirects=False)
 
 class PullReqState:
     num = 0
@@ -52,6 +66,7 @@ class PullReqState:
         if use_db:
             self.set_status('')
             self.set_mergeable(None)
+            self.init_build_res([])
 
     def __repr__(self):
         return 'PullReqState#{}(approved_by={}, priority={}, status={})'.format(
@@ -86,6 +101,10 @@ class PullReqState:
 
         self.db.execute('INSERT OR REPLACE INTO state (repo, num, status) VALUES (?, ?, ?)', [self.repo_label, self.num, self.status])
 
+        # FIXME: self.try_ should also be saved in the database
+        if not self.try_:
+            self.db.execute('UPDATE state SET merge_sha = ? WHERE repo = ? AND num = ?', [self.merge_sha, self.repo_label, self.num])
+
     def get_status(self):
         return 'approved' if self.status == '' and self.approved_by and self.mergeable is not False else self.status
 
@@ -99,6 +118,39 @@ class PullReqState:
                 self.mergeable_que.append([self, cause])
 
             self.db.execute('DELETE FROM mergeable WHERE repo = ? AND num = ?', [self.repo_label, self.num])
+
+    def init_build_res(self, builders, *, use_db=True):
+        self.build_res = {x: {
+            'res': None,
+            'url': '',
+            'ori_url': '',
+        } for x in builders}
+
+        if use_db:
+            self.db.execute('DELETE FROM build_res WHERE repo = ? AND num = ?', [self.repo_label, self.num])
+
+    def set_build_res(self, builder, res, url):
+        if builder not in self.build_res:
+            raise Exception('Invalid builder: {}'.format(builder))
+
+        ori_url = self.build_res[builder]['ori_url']
+        if not ori_url: ori_url = url
+
+        self.build_res[builder] = {
+            'res': res,
+            'url': url,
+            'ori_url': ori_url,
+        }
+
+        self.db.execute('INSERT OR REPLACE INTO build_res (repo, num, builder, res, url, ori_url, merge_sha) VALUES (?, ?, ?, ?, ?, ?, ?)', [
+            self.repo_label,
+            self.num,
+            builder,
+            res,
+            url,
+            ori_url,
+            self.merge_sha,
+        ])
 
 def sha_cmp(short, full):
     return len(short) >= 4 and short == full[:len(short)]
@@ -140,35 +192,34 @@ def parse_commands(body, username, repo_cfg, state, my_username, db, *, realtime
             state.try_ = word == 'try'
 
             state.merge_sha = ''
-            state.build_res = {}
+            state.init_build_res([])
 
         elif word in ['rollup', 'rollup-']:
             state.rollup = word == 'rollup'
 
         elif word == 'force' and realtime:
-            sess = requests.Session()
+            with buildbot_sess(repo_cfg) as sess:
+                res = sess.post(repo_cfg['buildbot']['url'] + '/builders/_selected/stopselected', allow_redirects=False, data={
+                    'selected': repo_cfg['buildbot']['builders'],
+                    'comments': 'Interrupted by Homu',
+                })
 
-            sess.post(repo_cfg['buildbot']['url'] + '/login', allow_redirects=False, data={
-                'username': repo_cfg['buildbot']['username'],
-                'passwd': repo_cfg['buildbot']['password'],
-            })
-
-            res = sess.post(repo_cfg['buildbot']['url'] + '/builders/_selected/stopselected', allow_redirects=False, data={
-                'selected': repo_cfg['buildbot']['builders'],
-                'comments': 'Interrupted by Homu',
-            })
-
-            sess.get(repo_cfg['buildbot']['url'] + '/logout', allow_redirects=False)
-
-            err = ''
             if 'authzfail' in res.text:
                 err = 'Authorization failed'
             else:
                 mat = re.search('(?s)<div class="error">(.*?)</div>', res.text)
-                if mat: err = mat.group(1).strip()
+                if mat:
+                    err = mat.group(1).strip()
+                    if not err: err = 'Unknown error'
+                else:
+                    err = ''
 
             if err:
                 state.add_comment(':bomb: Buildbot returned an error: `{}`'.format(err))
+
+        elif word == 'clean' and realtime:
+            state.merge_sha = ''
+            state.init_build_res([])
 
         else:
             found = False
@@ -178,17 +229,10 @@ def parse_commands(body, username, repo_cfg, state, my_username, db, *, realtime
 
     return state_changed
 
-def start_build(state, repo, repo_cfgs, buildbot_slots, logger, db):
-    if buildbot_slots[0]:
-        return True
-
-    assert state.head_sha == repo.pull_request(state.num).head.sha
-
-    repo_cfg = repo_cfgs[state.repo_label]
-
-    master_sha = repo.ref('heads/' + repo_cfg.get('branch', {}).get('master', 'master')).object.sha
+def create_merge(state, repo_cfg):
+    master_sha = state.repo.ref('heads/' + repo_cfg.get('branch', {}).get('master', 'master')).object.sha
     utils.github_set_ref(
-        repo,
+        state.repo,
         'heads/' + repo_cfg.get('branch', {}).get('tmp', 'tmp'),
         master_sha,
         force=True,
@@ -200,49 +244,113 @@ def start_build(state, repo, repo_cfgs, buildbot_slots, logger, db):
         '<try>' if state.try_ else state.approved_by,
         state.body,
     )
-    try: merge_commit = repo.merge(repo_cfg.get('branch', {}).get('tmp', 'tmp'), state.head_sha, merge_msg)
+    try: merge_commit = state.repo.merge(repo_cfg.get('branch', {}).get('tmp', 'tmp'), state.head_sha, merge_msg)
     except github3.models.GitHubError as e:
         if e.code != 409: raise
 
         desc = 'Merge conflict'
-        utils.github_create_status(repo, state.head_sha, 'error', '', desc, context='homu')
+        utils.github_create_status(state.repo, state.head_sha, 'error', '', desc, context='homu')
         state.set_status('error')
 
         state.add_comment(':lock: ' + desc)
 
+        return None
+
+    return merge_commit
+
+def start_build(state, repo_cfgs, buildbot_slots, logger, db):
+    if buildbot_slots[0]:
+        return True
+
+    assert state.head_sha == state.repo.pull_request(state.num).head.sha
+
+    repo_cfg = repo_cfgs[state.repo_label]
+
+    merge_commit = create_merge(state, repo_cfg)
+    if not merge_commit:
         return False
+
+    if 'buildbot' in repo_cfg:
+        branch = 'try' if state.try_ else 'auto'
+        branch = repo_cfg.get('branch', {}).get(branch, branch)
+        builders = repo_cfg['buildbot']['try_builders' if state.try_ else 'builders']
+    elif 'travis' in repo_cfg:
+        branch = repo_cfg.get('branch', {}).get('auto', 'auto')
+        builders = ['travis']
     else:
-        if 'buildbot' in repo_cfg:
-            branch = 'try' if state.try_ else 'auto'
-            branch = repo_cfg.get('branch', {}).get(branch, branch)
-            builders = repo_cfg['buildbot']['try_builders' if state.try_ else 'builders']
-        elif 'travis' in repo_cfg:
-            branch = repo_cfg.get('branch', {}).get('auto', 'auto')
-            builders = ['travis']
-        else:
-            raise RuntimeError('Invalid configuration')
+        raise RuntimeError('Invalid configuration')
 
-        utils.github_set_ref(repo, 'heads/' + branch, merge_commit.sha, force=True)
+    utils.github_set_ref(state.repo, 'heads/' + branch, merge_commit.sha, force=True)
 
-        state.build_res = {x: None for x in builders}
-        state.merge_sha = merge_commit.sha
+    state.init_build_res(builders)
+    state.merge_sha = merge_commit.sha
 
-        if 'buildbot' in repo_cfg:
-            buildbot_slots[0] = state.merge_sha
+    if 'buildbot' in repo_cfg:
+        buildbot_slots[0] = state.merge_sha
 
-        logger.info('Starting build of #{} on {}: {}'.format(state.num, branch, state.merge_sha))
+    logger.info('Starting build of #{} on {}: {}'.format(state.num, branch, state.merge_sha))
 
-        desc = '{} commit {:.7} with merge {:.7}...'.format('Trying' if state.try_ else 'Testing', state.head_sha, state.merge_sha)
-        utils.github_create_status(repo, state.head_sha, 'pending', '', desc, context='homu')
-        state.set_status('pending')
+    desc = '{} commit {:.7} with merge {:.7}...'.format('Trying' if state.try_ else 'Testing', state.head_sha, state.merge_sha)
+    utils.github_create_status(state.repo, state.head_sha, 'pending', '', desc, context='homu')
+    state.set_status('pending')
 
-        state.add_comment(':hourglass: ' + desc)
-
-        # FIXME: state.try_ should also be saved in the database
-        if not state.try_:
-            db.execute('UPDATE state SET merge_sha = ? WHERE repo = ? AND num = ?', [state.merge_sha, state.repo_label, state.num])
+    state.add_comment(':hourglass: ' + desc)
 
     return True
+
+def start_rebuild(state, repo_cfgs, *args):
+    repo_cfg = repo_cfgs[state.repo_label]
+
+    if 'buildbot' in repo_cfg and state.build_res:
+        builders = []
+
+        for builder, info in state.build_res.items():
+            if info['res']: continue
+
+            if not info['ori_url']:
+                builders = []
+                break
+
+            builders.append([builder, info['ori_url']])
+
+        if builders:
+            builders.sort()
+
+            master_sha = state.repo.ref('heads/' + repo_cfg.get('branch', {}).get('master', 'master')).object.sha
+            parent_shas = [x['sha'] for x in state.repo.commit(state.merge_sha).parents]
+
+            if master_sha in parent_shas:
+                with buildbot_sess(repo_cfg) as sess:
+                    for builder, url in builders:
+                        res = sess.post(url + '/rebuild', allow_redirects=False, data={
+                            'useSourcestamp': 'exact',
+                            'comments': 'Initiated by Homu',
+                        })
+
+                        if 'authzfail' in res.text:
+                            err = 'Authorization failed'
+                        elif builder in res.text:
+                            err = ''
+                        else:
+                            mat = re.search('<title>(.+?)</title>', res.text)
+                            err = mat.group(1) if mat else 'Unknown error'
+
+                        if err:
+                            state.add_comment(':bomb: Failed to start rebuilding: `{}`'.format(err))
+                            break
+
+                    else:
+                        msg = 'Previous build results are reusable. Rebuilding'
+                        builders_msg = ', '.join('[{}]({})'.format(builder, url) for builder, url in builders)
+
+                        utils.github_create_status(state.repo, state.head_sha, 'pending', '', '{}...'.format(msg), context='homu')
+                        state.set_status('pending')
+
+                        state.add_comment(':zap: {} only {}...'.format(msg, builders_msg))
+
+                        return True
+
+    return start_build(state, repo_cfgs, *args)
 
 def process_queue(states, repos, repo_cfgs, logger, buildbot_slots, db):
     for repo_label, repo in repos.items():
@@ -253,18 +361,18 @@ def process_queue(states, repos, repo_cfgs, logger, buildbot_slots, db):
                 break
 
             elif state.status == '' and state.approved_by:
-                if start_build(state, repo, repo_cfgs, buildbot_slots, logger, db):
+                if start_rebuild(state, repo_cfgs, buildbot_slots, logger, db):
                     return
 
             elif state.status == 'success' and state.try_ and state.approved_by:
                 state.try_ = False
 
-                if start_build(state, repo, repo_cfgs, buildbot_slots, logger, db):
+                if start_build(state, repo_cfgs, buildbot_slots, logger, db):
                     return
 
         for state in repo_states:
             if state.status == '' and state.try_:
-                if start_build(state, repo, repo_cfgs, buildbot_slots, logger, db):
+                if start_build(state, repo_cfgs, buildbot_slots, logger, db):
                     return
 
 def fetch_mergeability(mergeable_que):
@@ -330,7 +438,10 @@ def main():
         repo TEXT NOT NULL,
         num INTEGER NOT NULL,
         builder TEXT NOT NULL,
-        res TEXT NOT NULL,
+        res INTEGER,
+        url TEXT NOT NULL,
+        ori_url TEXT NOT NULL,
+        merge_sha TEXT NOT NULL,
         UNIQUE (repo, num, builder)
     )''')
 
@@ -411,22 +522,28 @@ def main():
             else:
                 builders = ['travis']
 
-            state.build_res = {x: None for x in builders}
+            state.init_build_res(builders, use_db=False)
             state.merge_sha = merge_sha
 
         elif state.status == 'pending':
             # FIXME: There might be a better solution
             state.status = ''
 
-    db.execute('SELECT repo, num, builder, res FROM build_res')
-    for repo_label, num, builder, res in db.fetchall():
-        try: state = states[repo_label][num]
+    db.execute('SELECT repo, num, builder, res, url, ori_url, merge_sha FROM build_res')
+    for repo_label, num, builder, res, url, ori_url, merge_sha in db.fetchall():
+        try:
+            state = states[repo_label][num]
+            if builder not in state.build_res: raise KeyError
+            if state.merge_sha != merge_sha: raise KeyError
         except KeyError:
             db.execute('DELETE FROM build_res WHERE repo = ? AND num = ? AND builder = ?', [repo_label, num, builder])
             continue
 
-        if builder in state.build_res:
-            state.build_res[builder] = json.loads(res)
+        state.build_res[builder] = {
+            'res': bool(res) if res is not None else None,
+            'url': url,
+            'ori_url': ori_url,
+        }
 
     db.execute('SELECT repo, num, mergeable FROM mergeable')
     for repo_label, num, mergeable in db.fetchall():

@@ -13,6 +13,14 @@ import hashlib
 class G: pass
 g = G()
 
+def find_state(sha):
+    for repo_label, repo_states in g.states.items():
+        for state in repo_states.values():
+            if state.merge_sha == sha:
+                return state, repo_label
+
+    raise ValueError('Invalid SHA')
+
 @get('/')
 def index():
     return g.tpls['index'].render(repos=sorted(g.repos))
@@ -260,30 +268,28 @@ def github():
 
     return 'OK'
 
-def report_build_res(succ, url, builder, repo_label, repo, state):
-    res = url if succ else False
-    state.build_res[builder] = res
-    g.db.execute('INSERT OR REPLACE INTO build_res (repo, num, builder, res) VALUES (?, ?, ?, ?)', [repo_label, state.num, builder, json.dumps(res)])
+def report_build_res(succ, url, builder, repo_label, state):
+    state.set_build_res(builder, succ, url)
 
     if succ:
-        if all(state.build_res.values()):
+        if all(x['res'] for x in state.build_res.values()):
             desc = 'Test successful'
-            utils.github_create_status(repo, state.head_sha, 'success', url, desc, context='homu')
+            utils.github_create_status(state.repo, state.head_sha, 'success', url, desc, context='homu')
             state.set_status('success')
 
-            urls = ', '.join('[{}]({})'.format(builder, url) for builder, url in sorted(state.build_res.items()))
+            urls = ', '.join('[{}]({})'.format(builder, x['url']) for builder, x in sorted(state.build_res.items()))
             state.add_comment(':sunny: {} - {}'.format(desc, urls))
 
             if state.approved_by and not state.try_:
                 try:
                     utils.github_set_ref(
-                        repo,
+                        state.repo,
                         'heads/' + g.repo_cfgs[repo_label].get('branch', {}).get('master', 'master'),
-                        state.merge_sha
+                        state.merge_sha,
                     )
                 except github3.models.GitHubError as e:
                     desc = 'Test was successful, but fast-forwarding failed: {}'.format(e)
-                    utils.github_create_status(repo, state.head_sha, 'error', url, desc, context='homu')
+                    utils.github_create_status(state.repo, state.head_sha, 'error', url, desc, context='homu')
                     state.set_status('error')
 
                     state.add_comment(':eyes: ' + desc)
@@ -291,7 +297,7 @@ def report_build_res(succ, url, builder, repo_label, repo, state):
     else:
         if state.status == 'pending':
             desc = 'Test failed'
-            utils.github_create_status(repo, state.head_sha, 'failure', url, desc, context='homu')
+            utils.github_create_status(state.repo, state.head_sha, 'failure', url, desc, context='homu')
             state.set_status('failure')
 
             state.add_comment(':broken_heart: {} - [{}]({})'.format(desc, builder, url))
@@ -308,45 +314,55 @@ def buildbot():
 
             if 'retry' in info['text']: continue
 
-            found = False
             rev = [x[1] for x in info['properties'] if x[0] == 'revision'][0]
-            if rev:
-                for repo in g.repos.values():
-                    repo_label = g.repo_labels[repo.owner.login, repo.name]
+            if not rev: continue
 
-                    for state in g.states[repo_label].values():
-                        if state.merge_sha == rev:
-                            found = True
-                            break
+            try: state, repo_label = find_state(rev)
+            except ValueError:
+                g.logger.debug('Invalid commit ID from Buildbot: {}'.format(rev))
+                continue
 
-                    if found: break
+            if info['builderName'] not in state.build_res:
+                g.logger.debug('Invalid builder from Buildbot: {}'.format(info['builderName']))
+                continue
 
-            if found and info['builderName'] in state.build_res:
+            repo_cfg = g.repo_cfgs[repo_label]
+
+            if request.forms.secret != repo_cfg['buildbot']['secret']:
+                abort(400, 'Invalid secret')
+
+            build_succ = 'successful' in info['text'] or info['results'] == 0
+
+            url = '{}/builders/{}/builds/{}'.format(
+                repo_cfg['buildbot']['url'],
+                info['builderName'],
+                info['number'],
+            )
+
+            report_build_res(build_succ, url, info['builderName'], repo_label, state)
+
+        elif row['event'] == 'buildStarted':
+            info = row['payload']['build']
+            rev = [x[1] for x in info['properties'] if x[0] == 'revision'][0]
+            if not rev: continue
+
+            try: state, repo_label = find_state(rev)
+            except ValueError: pass
+            else:
                 repo_cfg = g.repo_cfgs[repo_label]
 
                 if request.forms.secret != repo_cfg['buildbot']['secret']:
                     abort(400, 'Invalid secret')
 
-                builder = info['builderName']
-                build_num = info['number']
-                build_succ = 'successful' in info['text'] or info['results'] == 0
-
                 url = '{}/builders/{}/builds/{}'.format(
                     repo_cfg['buildbot']['url'],
-                    builder,
-                    build_num,
+                    info['builderName'],
+                    info['number'],
                 )
 
-                report_build_res(build_succ, url, builder, repo_label, repo, state)
+                state.set_build_res(info['builderName'], None, url)
 
-            else:
-                g.logger.debug('Invalid commit ID from Buildbot on {}: {}'.format(info['builderName'], rev))
-
-        elif row['event'] == 'buildStarted':
-            info = row['payload']['build']
-            rev = [x[1] for x in info['properties'] if x[0] == 'revision'][0]
-
-            if rev and g.buildbot_slots[0] == rev:
+            if g.buildbot_slots[0] == rev:
                 g.buildbot_slots[0] = ''
 
                 g.queue_handler()
@@ -357,32 +373,22 @@ def buildbot():
 def travis():
     info = json.loads(request.forms.payload)
 
-    if not info['commit']:
-        abort(400, 'Invalid commit ID')
-
-    found = False
-    for repo in g.repos.values():
-        repo_label = g.repo_labels[repo.owner.login, repo.name]
-
-        for state in g.states[repo_label].values():
-            if state.merge_sha == info['commit']:
-                found = True
-                break
-
-        if found: break
-
-    if found and 'travis' in state.build_res:
-        token = g.repo_cfgs[repo_label]['travis']['token']
-        code = hashlib.sha256(('{}/{}{}'.format(repo.owner.login, repo.name, token)).encode('utf-8')).hexdigest()
-        if request.headers['Authorization'] != code:
-            abort(400, 'Authorization failed')
-
-        succ = info['result'] == 0
-
-        report_build_res(succ, info['build_url'], 'travis', repo_label, repo, state)
-
-    else:
+    try: state, repo_label = find_state(info['commit'])
+    except ValueError:
         g.logger.debug('Invalid commit ID from Travis: {}'.format(info['commit']))
+        return 'OK'
+
+    if 'travis' not in state.build_res:
+        return 'OK'
+
+    token = g.repo_cfgs[repo_label]['travis']['token']
+    code = hashlib.sha256(('{}/{}{}'.format(state.repo.owner.login, state.repo.name, token)).encode('utf-8')).hexdigest()
+    if request.headers['Authorization'] != code:
+        abort(400, 'Authorization failed')
+
+    succ = info['result'] == 0
+
+    report_build_res(succ, info['build_url'], 'travis', repo_label, state)
 
     return 'OK'
 
