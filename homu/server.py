@@ -237,7 +237,7 @@ def github():
     elif event_type == 'push':
         ref = info['ref'][len('refs/heads/'):]
 
-        for state in g.states[repo_label].values():
+        for state in list(g.states[repo_label].values()):
             if state.base_ref == ref:
                 state.set_mergeable(None, cause={
                     'sha': info['head_commit']['id'],
