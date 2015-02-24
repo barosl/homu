@@ -10,6 +10,8 @@ import pkg_resources
 from bottle import get, post, run, request, redirect, abort, response
 import hashlib
 
+import bottle; bottle.BaseRequest.MEMFILE_MAX = 1024 * 1024 * 10
+
 class G: pass
 g = G()
 
