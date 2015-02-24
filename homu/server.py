@@ -1,7 +1,7 @@
 import hmac
 import json
 import urllib.parse
-from .main import PullReqState, parse_commands
+from .main import PullReqState, parse_commands, db_query
 from . import utils
 import github3
 import jinja2
@@ -220,9 +220,9 @@ def github():
         elif action == 'closed':
             del g.states[repo_label][pull_num]
 
-            g.db.execute('DELETE FROM state WHERE repo = ? AND num = ?', [repo_label, pull_num])
-            g.db.execute('DELETE FROM build_res WHERE repo = ? AND num = ?', [repo_label, pull_num])
-            g.db.execute('DELETE FROM mergeable WHERE repo = ? AND num = ?', [repo_label, pull_num])
+            db_query(g.db, 'DELETE FROM state WHERE repo = ? AND num = ?', [repo_label, pull_num])
+            db_query(g.db, 'DELETE FROM build_res WHERE repo = ? AND num = ?', [repo_label, pull_num])
+            db_query(g.db, 'DELETE FROM mergeable WHERE repo = ? AND num = ?', [repo_label, pull_num])
 
             g.queue_handler()
 

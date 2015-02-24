@@ -4,7 +4,7 @@ import json
 import re
 from . import utils
 import logging
-from threading import Thread
+from threading import Thread, Lock
 import time
 import traceback
 import sqlite3
@@ -32,6 +32,11 @@ def buildbot_sess(repo_cfg):
     yield sess
 
     sess.get(repo_cfg['buildbot']['url'] + '/logout', allow_redirects=False)
+
+db_query_lock = Lock()
+def db_query(db, *args):
+    with db_query_lock:
+        db.execute(*args)
 
 class PullReqState:
     num = 0
@@ -99,11 +104,11 @@ class PullReqState:
     def set_status(self, status):
         self.status = status
 
-        self.db.execute('INSERT OR REPLACE INTO state (repo, num, status) VALUES (?, ?, ?)', [self.repo_label, self.num, self.status])
+        db_query(self.db, 'INSERT OR REPLACE INTO state (repo, num, status) VALUES (?, ?, ?)', [self.repo_label, self.num, self.status])
 
         # FIXME: self.try_ should also be saved in the database
         if not self.try_:
-            self.db.execute('UPDATE state SET merge_sha = ? WHERE repo = ? AND num = ?', [self.merge_sha, self.repo_label, self.num])
+            db_query(self.db, 'UPDATE state SET merge_sha = ? WHERE repo = ? AND num = ?', [self.merge_sha, self.repo_label, self.num])
 
     def get_status(self):
         return 'approved' if self.status == '' and self.approved_by and self.mergeable is not False else self.status
@@ -112,12 +117,12 @@ class PullReqState:
         if mergeable is not None:
             self.mergeable = mergeable
 
-            self.db.execute('INSERT OR REPLACE INTO mergeable (repo, num, mergeable) VALUES (?, ?, ?)', [self.repo_label, self.num, self.mergeable])
+            db_query(self.db, 'INSERT OR REPLACE INTO mergeable (repo, num, mergeable) VALUES (?, ?, ?)', [self.repo_label, self.num, self.mergeable])
         else:
             if que:
                 self.mergeable_que.append([self, cause])
 
-            self.db.execute('DELETE FROM mergeable WHERE repo = ? AND num = ?', [self.repo_label, self.num])
+            db_query(self.db, 'DELETE FROM mergeable WHERE repo = ? AND num = ?', [self.repo_label, self.num])
 
     def init_build_res(self, builders, *, use_db=True):
         self.build_res = {x: {
@@ -127,7 +132,7 @@ class PullReqState:
         } for x in builders}
 
         if use_db:
-            self.db.execute('DELETE FROM build_res WHERE repo = ? AND num = ?', [self.repo_label, self.num])
+            db_query(self.db, 'DELETE FROM build_res WHERE repo = ? AND num = ?', [self.repo_label, self.num])
 
     def set_build_res(self, builder, res, url):
         if builder not in self.build_res:
@@ -142,7 +147,7 @@ class PullReqState:
             'ori_url': ori_url,
         }
 
-        self.db.execute('INSERT OR REPLACE INTO build_res (repo, num, builder, res, url, ori_url, merge_sha) VALUES (?, ?, ?, ?, ?, ?, ?)', [
+        db_query(self.db, 'INSERT OR REPLACE INTO build_res (repo, num, builder, res, url, ori_url, merge_sha) VALUES (?, ?, ?, ?, ?, ?, ?)', [
             self.repo_label,
             self.num,
             builder,
@@ -426,7 +431,7 @@ def main():
     db_conn = sqlite3.connect('main.db', check_same_thread=False, isolation_level=None)
     db = db_conn.cursor()
 
-    db.execute('''CREATE TABLE IF NOT EXISTS state (
+    db_query(db, '''CREATE TABLE IF NOT EXISTS state (
         repo TEXT NOT NULL,
         num INTEGER NOT NULL,
         status TEXT NOT NULL,
@@ -434,7 +439,7 @@ def main():
         UNIQUE (repo, num)
     )''')
 
-    db.execute('''CREATE TABLE IF NOT EXISTS build_res (
+    db_query(db, '''CREATE TABLE IF NOT EXISTS build_res (
         repo TEXT NOT NULL,
         num INTEGER NOT NULL,
         builder TEXT NOT NULL,
@@ -445,7 +450,7 @@ def main():
         UNIQUE (repo, num, builder)
     )''')
 
-    db.execute('''CREATE TABLE IF NOT EXISTS mergeable (
+    db_query(db, '''CREATE TABLE IF NOT EXISTS mergeable (
         repo TEXT NOT NULL,
         num INTEGER NOT NULL,
         mergeable INTEGER NOT NULL,
@@ -462,7 +467,7 @@ def main():
         repo_cfgs[repo_label] = repo_cfg
 
         for pull in repo.iter_pulls(state='open'):
-            db.execute('SELECT status FROM state WHERE repo = ? AND num = ?', [repo_label, pull.number])
+            db_query(db, 'SELECT status FROM state WHERE repo = ? AND num = ?', [repo_label, pull.number])
             row = db.fetchone()
             if row:
                 status = row[0]
@@ -473,7 +478,7 @@ def main():
                         status = info.state
                         break
 
-                db.execute('INSERT INTO state (repo, num, status) VALUES (?, ?, ?)', [repo_label, pull.number, status])
+                db_query(db, 'INSERT INTO state (repo, num, status) VALUES (?, ?, ?)', [repo_label, pull.number, status])
 
             state = PullReqState(pull.number, pull.head.sha, status, repo, db, repo_label, mergeable_que)
             state.title = pull.title
@@ -509,11 +514,11 @@ def main():
 
         repo_labels[repo.owner.login, repo.name] = repo_label
 
-    db.execute('SELECT repo, num, merge_sha FROM state')
+    db_query(db, 'SELECT repo, num, merge_sha FROM state')
     for repo_label, num, merge_sha in db.fetchall():
         try: state = states[repo_label][num]
         except KeyError:
-            db.execute('DELETE FROM state WHERE repo = ? AND num = ?', [repo_label, num])
+            db_query(db, 'DELETE FROM state WHERE repo = ? AND num = ?', [repo_label, num])
             continue
 
         if merge_sha:
@@ -529,14 +534,14 @@ def main():
             # FIXME: There might be a better solution
             state.status = ''
 
-    db.execute('SELECT repo, num, builder, res, url, ori_url, merge_sha FROM build_res')
+    db_query(db, 'SELECT repo, num, builder, res, url, ori_url, merge_sha FROM build_res')
     for repo_label, num, builder, res, url, ori_url, merge_sha in db.fetchall():
         try:
             state = states[repo_label][num]
             if builder not in state.build_res: raise KeyError
             if state.merge_sha != merge_sha: raise KeyError
         except KeyError:
-            db.execute('DELETE FROM build_res WHERE repo = ? AND num = ? AND builder = ?', [repo_label, num, builder])
+            db_query(db, 'DELETE FROM build_res WHERE repo = ? AND num = ? AND builder = ?', [repo_label, num, builder])
             continue
 
         state.build_res[builder] = {
@@ -545,11 +550,11 @@ def main():
             'ori_url': ori_url,
         }
 
-    db.execute('SELECT repo, num, mergeable FROM mergeable')
+    db_query(db, 'SELECT repo, num, mergeable FROM mergeable')
     for repo_label, num, mergeable in db.fetchall():
         try: state = states[repo_label][num]
         except KeyError:
-            db.execute('DELETE FROM mergeable WHERE repo = ? AND num = ?', [repo_label, num])
+            db_query(db, 'DELETE FROM mergeable WHERE repo = ? AND num = ?', [repo_label, num])
             continue
 
         state.mergeable = bool(mergeable) if mergeable is not None else None
