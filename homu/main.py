@@ -11,6 +11,7 @@ import sqlite3
 import requests
 from contextlib import contextmanager
 from itertools import chain
+from queue import Queue
 
 STATUS_TO_PRIORITY = {
     'success': 0,
@@ -121,7 +122,7 @@ class PullReqState:
             db_query(self.db, 'INSERT OR REPLACE INTO mergeable (repo, num, mergeable) VALUES (?, ?, ?)', [self.repo_label, self.num, self.mergeable])
         else:
             if que:
-                self.mergeable_que.append([self, cause])
+                self.mergeable_que.put([self, cause])
 
             db_query(self.db, 'DELETE FROM mergeable WHERE repo = ? AND num = ?', [self.repo_label, self.num])
 
@@ -385,30 +386,33 @@ def fetch_mergeability(mergeable_que):
 
     while True:
         try:
-            while mergeable_que:
-                state, cause = mergeable_que.pop()
+            state, cause = mergeable_que.get()
 
+            mergeable = state.repo.pull_request(state.num).mergeable
+            if mergeable is None:
+                time.sleep(5)
                 mergeable = state.repo.pull_request(state.num).mergeable
 
-                if state.mergeable is True and mergeable is False:
-                    if cause:
-                        mat = re_pull_num.search(cause['title'])
+            if state.mergeable is True and mergeable is False:
+                if cause:
+                    mat = re_pull_num.search(cause['title'])
 
-                        if mat: issue_or_commit = '#' + mat.group(1)
-                        else: issue_or_commit = cause['sha'][:7]
-                    else:
-                        issue_or_commit = ''
+                    if mat: issue_or_commit = '#' + mat.group(1)
+                    else: issue_or_commit = cause['sha'][:7]
+                else:
+                    issue_or_commit = ''
 
-                    state.add_comment(':umbrella: The latest upstream changes{} made this pull request unmergeable. Please resolve the merge conflicts.'.format(
-                        ' (presumably {})'.format(issue_or_commit) if issue_or_commit else '',
-                    ))
+                state.add_comment(':umbrella: The latest upstream changes{} made this pull request unmergeable. Please resolve the merge conflicts.'.format(
+                    ' (presumably {})'.format(issue_or_commit) if issue_or_commit else '',
+                ))
 
-                state.set_mergeable(mergeable, que=False)
+            state.set_mergeable(mergeable, que=False)
 
         except:
             traceback.print_exc()
 
-        time.sleep(10)
+        finally:
+            mergeable_que.task_done()
 
 def main():
     logger = logging.getLogger('homu')
@@ -426,7 +430,7 @@ def main():
     buildbot_slots = ['']
     my_username = gh.user().login
     repo_labels = {}
-    mergeable_que = []
+    mergeable_que = Queue()
 
     db_conn = sqlite3.connect('main.db', check_same_thread=False, isolation_level=None)
     db = db_conn.cursor()
