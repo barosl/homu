@@ -10,6 +10,7 @@ import traceback
 import sqlite3
 import requests
 from contextlib import contextmanager
+from itertools import chain
 
 STATUS_TO_PRIORITY = {
     'success': 0,
@@ -164,23 +165,22 @@ def parse_commands(body, username, repo_cfg, state, my_username, db, *, realtime
     if username not in repo_cfg['reviewers']:
         return False
 
-    mentioned = '@' + my_username in body
-    if not mentioned: return False
-
     state_changed = False
 
-    words = re.findall(r'\S+', body)
+    words = list(chain.from_iterable(re.findall(r'\S+', x) for x in body.splitlines() if '@' + my_username in x))
     for i, word in enumerate(words):
         found = True
 
         if word == 'r+' or word.startswith('r='):
             if not sha and i+1 < len(words):
-                sha = words[i+1]
+                cur_sha = words[i+1]
+            else:
+                cur_sha = sha
 
-            if sha_cmp(sha, state.head_sha):
+            if sha_cmp(cur_sha, state.head_sha):
                 state.approved_by = word[len('r='):] if word.startswith('r=') else username
             elif realtime:
-                msg = '`{}` is not a valid commit SHA.'.format(sha) if sha else 'No commit SHA found.'
+                msg = '`{}` is not a valid commit SHA.'.format(cur_sha) if cur_sha else 'No commit SHA found.'
                 state.add_comment(':scream_cat: {} Please try again with `{:.7}`.'.format(msg, state.head_sha))
 
         elif word == 'r-':
