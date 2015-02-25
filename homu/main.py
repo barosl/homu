@@ -163,7 +163,7 @@ def sha_cmp(short, full):
     return len(short) >= 4 and short == full[:len(short)]
 
 def parse_commands(body, username, repo_cfg, state, my_username, db, *, realtime=False, sha=''):
-    if username not in repo_cfg['reviewers']:
+    if username not in repo_cfg['reviewers'] and username != my_username:
         return False
 
     state_changed = False
@@ -181,8 +181,11 @@ def parse_commands(body, username, repo_cfg, state, my_username, db, *, realtime
             if sha_cmp(cur_sha, state.head_sha):
                 state.approved_by = word[len('r='):] if word.startswith('r=') else username
             elif realtime:
-                msg = '`{}` is not a valid commit SHA.'.format(cur_sha) if cur_sha else 'No commit SHA found.'
-                state.add_comment(':scream_cat: {} Please try again with `{:.7}`.'.format(msg, state.head_sha))
+                if cur_sha:
+                    msg = '`{}` is not a valid commit SHA.'.format(cur_sha)
+                    state.add_comment(':scream_cat: {} Please try again with `{:.7}`.'.format(msg, state.head_sha))
+                else:
+                    state.add_comment('@{} r={} {:.7}'.format(my_username, username, state.head_sha))
 
         elif word == 'r-':
             state.approved_by = ''
