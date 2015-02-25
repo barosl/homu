@@ -123,6 +123,8 @@ class PullReqState:
         else:
             if que:
                 self.mergeable_que.put([self, cause])
+            else:
+                self.mergeable = None
 
             db_query(self.db, 'DELETE FROM mergeable WHERE repo = ? AND num = ?', [self.repo_label, self.num])
 
