@@ -352,18 +352,19 @@ def buildbot():
             try: state, repo_label = find_state(rev)
             except ValueError: pass
             else:
-                repo_cfg = g.repo_cfgs[repo_label]
+                if info['builderName'] in state.build_res:
+                    repo_cfg = g.repo_cfgs[repo_label]
 
-                if request.forms.secret != repo_cfg['buildbot']['secret']:
-                    abort(400, 'Invalid secret')
+                    if request.forms.secret != repo_cfg['buildbot']['secret']:
+                        abort(400, 'Invalid secret')
 
-                url = '{}/builders/{}/builds/{}'.format(
-                    repo_cfg['buildbot']['url'],
-                    info['builderName'],
-                    info['number'],
-                )
+                    url = '{}/builders/{}/builds/{}'.format(
+                        repo_cfg['buildbot']['url'],
+                        info['builderName'],
+                        info['number'],
+                    )
 
-                state.set_build_res(info['builderName'], None, url)
+                    state.set_build_res(info['builderName'], None, url)
 
             if g.buildbot_slots[0] == rev:
                 g.buildbot_slots[0] = ''
