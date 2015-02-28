@@ -29,8 +29,16 @@ def index():
 
 @get('/queue/<repo_label>')
 def queue(repo_label):
-    repo = g.repos[repo_label]
-    pull_states = sorted(g.states[repo_label].values())
+    if repo_label == 'all':
+        labels = g.repos.keys()
+    else:
+        labels = repo_label.split('+')
+
+    states = []
+    for label in labels:
+        states += g.states[label].values()
+
+    pull_states = sorted(states)
 
     rows = []
     for state in pull_states:
@@ -38,7 +46,7 @@ def queue(repo_label):
             'status': state.get_status(),
             'status_ext': ' (try)' if state.try_ else '',
             'priority': 'rollup' if state.rollup else state.priority,
-            'url': 'https://github.com/{}/{}/pull/{}'.format(repo.owner.login, repo.name, state.num),
+            'url': 'https://github.com/{}/{}/pull/{}'.format(state.repo.owner.login, state.repo.name, state.num),
             'num': state.num,
             'approved_by': state.approved_by,
             'title': state.title,
