@@ -180,14 +180,16 @@ def parse_commands(body, username, repo_cfg, state, my_username, db, *, realtime
             else:
                 cur_sha = sha
 
+            approver = word[len('r='):] if word.startswith('r=') else username
+
             if sha_cmp(cur_sha, state.head_sha):
-                state.approved_by = word[len('r='):] if word.startswith('r=') else username
+                state.approved_by = approver
             elif realtime:
                 if cur_sha:
                     msg = '`{}` is not a valid commit SHA.'.format(cur_sha)
                     state.add_comment(':scream_cat: {} Please try again with `{:.7}`.'.format(msg, state.head_sha))
                 else:
-                    state.add_comment('@{} r={} {:.7}'.format(my_username, username, state.head_sha))
+                    state.add_comment('@{} r={} {:.7}'.format(my_username, approver, state.head_sha))
 
         elif word == 'r-':
             state.approved_by = ''
