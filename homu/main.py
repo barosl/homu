@@ -589,7 +589,10 @@ def main():
 
     logger.info('Done!')
 
-    queue_handler = lambda: process_queue(states, repos, repo_cfgs, logger, buildbot_slots, db)
+    queue_handler_lock = Lock()
+    def queue_handler():
+        with queue_handler_lock:
+            return process_queue(states, repos, repo_cfgs, logger, buildbot_slots, db)
 
     from . import server
     Thread(target=server.start, args=[cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots, my_username, db, repo_labels, mergeable_que]).start()
