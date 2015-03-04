@@ -1,7 +1,7 @@
 import hmac
 import json
 import urllib.parse
-from .main import PullReqState, parse_commands, db_query
+from .main import PullReqState, parse_commands, db_query, INTERRUPTED_BY_HOMU_RE
 from . import utils
 import github3
 import jinja2
@@ -276,9 +276,9 @@ def report_build_res(succ, url, builder, repo_label, state):
 
     if succ:
         if all(x['res'] for x in state.build_res.values()):
+            state.set_status('success')
             desc = 'Test successful'
             utils.github_create_status(state.repo, state.head_sha, 'success', url, desc, context='homu')
-            state.set_status('success')
 
             urls = ', '.join('[{}]({})'.format(builder, x['url']) for builder, x in sorted(state.build_res.items()))
             state.add_comment(':sunny: {} - {}'.format(desc, urls))
@@ -291,17 +291,17 @@ def report_build_res(succ, url, builder, repo_label, state):
                         state.merge_sha,
                     )
                 except github3.models.GitHubError as e:
+                    state.set_status('error')
                     desc = 'Test was successful, but fast-forwarding failed: {}'.format(e)
                     utils.github_create_status(state.repo, state.head_sha, 'error', url, desc, context='homu')
-                    state.set_status('error')
 
                     state.add_comment(':eyes: ' + desc)
 
     else:
         if state.status == 'pending':
+            state.set_status('failure')
             desc = 'Test failed'
             utils.github_create_status(state.repo, state.head_sha, 'failure', url, desc, context='homu')
-            state.set_status('failure')
 
             state.add_comment(':broken_heart: {} - [{}]({})'.format(desc, builder, url))
 
@@ -341,6 +341,41 @@ def buildbot():
                 info['builderName'],
                 props['buildnumber'],
             )
+
+            if 'interrupted' in info['text']:
+                step_name = ''
+                for step in reversed(info['steps']):
+                    if 'interrupted' in step.get('text', []):
+                        step_name = step['name']
+                        break
+
+                if step_name:
+                    res = requests.get('{}/builders/{}/builds/{}/steps/{}/logs/interrupt'.format(
+                        repo_cfg['buildbot']['url'],
+                        info['builderName'],
+                        props['buildnumber'],
+                        step_name,
+                    ))
+
+                    mat = INTERRUPTED_BY_HOMU_RE.search(res.text)
+                    if mat:
+                        interrupt_token = mat.group(1)
+                        if getattr(state, 'interrupt_token', '') != interrupt_token:
+                            state.interrupt_token = interrupt_token
+
+                            if state.status == 'pending':
+                                state.set_status('')
+
+                                desc = ':snowman: The build was interrupted to prioritize another pull request.'
+                                state.add_comment(desc)
+                                utils.github_create_status(state.repo, state.head_sha, 'error', url, desc, context='homu')
+
+                                g.queue_handler()
+
+                        continue
+
+                else:
+                    g.logger.error('Corrupt payload from Buildbot')
 
             report_build_res(build_succ, url, info['builderName'], repo_label, state)
 

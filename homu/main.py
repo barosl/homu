@@ -22,6 +22,9 @@ STATUS_TO_PRIORITY = {
     'failure': 5,
 }
 
+INTERRUPTED_BY_HOMU_FMT = 'Interrupted by Homu ({})'
+INTERRUPTED_BY_HOMU_RE = re.compile(r'Interrupted by Homu \((.+?)\)')
+
 @contextmanager
 def buildbot_sess(repo_cfg):
     sess = requests.Session()
@@ -218,7 +221,7 @@ def parse_commands(body, username, repo_cfg, state, my_username, db, *, realtime
             with buildbot_sess(repo_cfg) as sess:
                 res = sess.post(repo_cfg['buildbot']['url'] + '/builders/_selected/stopselected', allow_redirects=False, data={
                     'selected': repo_cfg['buildbot']['builders'],
-                    'comments': 'Interrupted by Homu',
+                    'comments': INTERRUPTED_BY_HOMU_FMT.format(int(time.time())),
                 })
 
             if 'authzfail' in res.text:
@@ -267,9 +270,9 @@ def create_merge(state, repo_cfg):
     except github3.models.GitHubError as e:
         if e.code != 409: raise
 
+        state.set_status('error')
         desc = 'Merge conflict'
         utils.github_create_status(state.repo, state.head_sha, 'error', '', desc, context='homu')
-        state.set_status('error')
 
         state.add_comment(':lock: ' + desc)
 
@@ -309,9 +312,9 @@ def start_build(state, repo_cfgs, buildbot_slots, logger, db):
 
     logger.info('Starting build of #{} on {}: {}'.format(state.num, branch, state.merge_sha))
 
+    state.set_status('pending')
     desc = '{} commit {:.7} with merge {:.7}...'.format('Trying' if state.try_ else 'Testing', state.head_sha, state.merge_sha)
     utils.github_create_status(state.repo, state.head_sha, 'pending', '', desc, context='homu')
-    state.set_status('pending')
 
     state.add_comment(':hourglass: ' + desc)
 
@@ -361,11 +364,12 @@ def start_rebuild(state, repo_cfgs, *args):
                             break
 
                     else:
+                        state.set_status('pending')
+
                         msg = 'Previous build results are reusable. Rebuilding'
                         builders_msg = ', '.join('[{}]({})'.format(builder, url) for builder, url in builders)
 
                         utils.github_create_status(state.repo, state.head_sha, 'pending', '', '{}...'.format(msg), context='homu')
-                        state.set_status('pending')
 
                         state.add_comment(':zap: {} only {}...'.format(msg, builders_msg))
 
