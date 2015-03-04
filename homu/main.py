@@ -135,7 +135,6 @@ class PullReqState:
         self.build_res = {x: {
             'res': None,
             'url': '',
-            'ori_url': '',
         } for x in builders}
 
         if use_db:
@@ -145,22 +144,17 @@ class PullReqState:
         if builder not in self.build_res:
             raise Exception('Invalid builder: {}'.format(builder))
 
-        ori_url = self.build_res[builder]['ori_url']
-        if not ori_url: ori_url = url
-
         self.build_res[builder] = {
             'res': res,
             'url': url,
-            'ori_url': ori_url,
         }
 
-        db_query(self.db, 'INSERT OR REPLACE INTO build_res (repo, num, builder, res, url, ori_url, merge_sha) VALUES (?, ?, ?, ?, ?, ?, ?)', [
+        db_query(self.db, 'INSERT OR REPLACE INTO build_res (repo, num, builder, res, url, merge_sha) VALUES (?, ?, ?, ?, ?, ?)', [
             self.repo_label,
             self.num,
             builder,
             res,
             url,
-            ori_url,
             self.merge_sha,
         ])
 
@@ -320,60 +314,73 @@ def start_build(state, repo_cfgs, buildbot_slots, logger, db):
 
     return True
 
-def start_rebuild(state, repo_cfgs, *args):
+def start_rebuild(state, repo_cfgs):
     repo_cfg = repo_cfgs[state.repo_label]
 
-    if 'buildbot' in repo_cfg and state.build_res:
-        builders = []
+    if 'buildbot' not in repo_cfg or not state.build_res:
+        return False
 
-        for builder, info in state.build_res.items():
-            if info['res']: continue
+    builders = []
+    succ_builders = []
 
-            if not info['ori_url']:
-                builders = []
-                break
+    for builder, info in state.build_res.items():
+        if not info['url']:
+            return False
 
-            builders.append([builder, info['ori_url']])
+        if info['res']:
+            succ_builders.append([builder, info['url']])
+        else:
+            builders.append([builder, info['url']])
 
-        if builders:
-            builders.sort()
+    if not builders or not succ_builders:
+        return False
 
-            master_sha = state.repo.ref('heads/' + repo_cfg.get('branch', {}).get('master', 'master')).object.sha
-            parent_shas = [x['sha'] for x in state.repo.commit(state.merge_sha).parents]
+    master_sha = state.repo.ref('heads/' + repo_cfg.get('branch', {}).get('master', 'master')).object.sha
+    parent_shas = [x['sha'] for x in state.repo.commit(state.merge_sha).parents]
 
-            if master_sha in parent_shas:
-                utils.github_set_ref(state.repo, 'tags/homu-tmp', state.merge_sha, force=True)
+    if master_sha not in parent_shas:
+        return False
 
-                with buildbot_sess(repo_cfg) as sess:
-                    for builder, url in builders:
-                        res = sess.post(url + '/rebuild', allow_redirects=False, data={
-                            'useSourcestamp': 'exact',
-                            'comments': 'Initiated by Homu',
-                        })
+    utils.github_set_ref(state.repo, 'tags/homu-tmp', state.merge_sha, force=True)
 
-                        if 'authzfail' in res.text:
-                            err = 'Authorization failed'
-                        elif builder in res.text:
-                            err = ''
-                        else:
-                            mat = re.search('<title>(.+?)</title>', res.text)
-                            err = mat.group(1) if mat else 'Unknown error'
+    builders.sort()
+    succ_builders.sort()
 
-                        if err:
-                            state.add_comment(':bomb: Failed to start rebuilding: `{}`'.format(err))
-                            break
+    with buildbot_sess(repo_cfg) as sess:
+        for builder, url in builders:
+            res = sess.post(url + '/rebuild', allow_redirects=False, data={
+                'useSourcestamp': 'exact',
+                'comments': 'Initiated by Homu',
+            })
 
-                    else:
-                        state.set_status('pending')
+            if 'authzfail' in res.text:
+                err = 'Authorization failed'
+            elif builder in res.text:
+                err = ''
+            else:
+                mat = re.search('<title>(.+?)</title>', res.text)
+                err = mat.group(1) if mat else 'Unknown error'
 
-                        msg = 'Previous build results are reusable. Rebuilding'
-                        builders_msg = ', '.join('[{}]({})'.format(builder, url) for builder, url in builders)
+            if err:
+                state.add_comment(':bomb: Failed to start rebuilding: `{}`'.format(err))
+                return False
 
-                        utils.github_create_status(state.repo, state.head_sha, 'pending', '', '{}...'.format(msg), context='homu')
+    state.set_status('pending')
 
-                        state.add_comment(':zap: {} only {}...'.format(msg, builders_msg))
+    msg_1 = 'Previous build results'
+    msg_2 = ' for {}'.format(', '.join('[{}]({})'.format(builder, url) for builder, url in succ_builders))
+    msg_3 = ' are reusable. Rebuilding'
+    msg_4 = ' only {}'.format(', '.join('[{}]({})'.format(builder, url) for builder, url in builders))
 
-                        return True
+    utils.github_create_status(state.repo, state.head_sha, 'pending', '', '{}{}...'.format(msg_1, msg_3), context='homu')
+
+    state.add_comment(':zap: {}{}{}{}...'.format(msg_1, msg_2, msg_3, msg_4))
+
+    return True
+
+def start_build_or_rebuild(state, repo_cfgs, *args):
+    if start_rebuild(state, repo_cfgs):
+        return True
 
     return start_build(state, repo_cfgs, *args)
 
@@ -386,7 +393,7 @@ def process_queue(states, repos, repo_cfgs, logger, buildbot_slots, db):
                 break
 
             elif state.status == '' and state.approved_by:
-                if start_rebuild(state, repo_cfgs, buildbot_slots, logger, db):
+                if start_build_or_rebuild(state, repo_cfgs, buildbot_slots, logger, db):
                     return
 
             elif state.status == 'success' and state.try_ and state.approved_by:
@@ -468,7 +475,6 @@ def main():
         builder TEXT NOT NULL,
         res INTEGER,
         url TEXT NOT NULL,
-        ori_url TEXT NOT NULL,
         merge_sha TEXT NOT NULL,
         UNIQUE (repo, num, builder)
     )''')
@@ -557,8 +563,8 @@ def main():
             # FIXME: There might be a better solution
             state.status = ''
 
-    db_query(db, 'SELECT repo, num, builder, res, url, ori_url, merge_sha FROM build_res')
-    for repo_label, num, builder, res, url, ori_url, merge_sha in db.fetchall():
+    db_query(db, 'SELECT repo, num, builder, res, url, merge_sha FROM build_res')
+    for repo_label, num, builder, res, url, merge_sha in db.fetchall():
         try:
             state = states[repo_label][num]
             if builder not in state.build_res: raise KeyError
@@ -570,7 +576,6 @@ def main():
         state.build_res[builder] = {
             'res': bool(res) if res is not None else None,
             'url': url,
-            'ori_url': ori_url,
         }
 
     db_query(db, 'SELECT repo, num, mergeable FROM mergeable')
