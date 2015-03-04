@@ -339,6 +339,8 @@ def start_rebuild(state, repo_cfgs, *args):
             parent_shas = [x['sha'] for x in state.repo.commit(state.merge_sha).parents]
 
             if master_sha in parent_shas:
+                utils.github_set_ref(state.repo, 'tags/homu-tmp', state.merge_sha, force=True)
+
                 with buildbot_sess(repo_cfg) as sess:
                     for builder, url in builders:
                         res = sess.post(url + '/rebuild', allow_redirects=False, data={
