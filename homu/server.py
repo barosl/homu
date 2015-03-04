@@ -314,15 +314,15 @@ def buildbot():
     for row in json.loads(request.forms.packets):
         if row['event'] == 'buildFinished':
             info = row['payload']['build']
+            props = dict(x[:2] for x in info['properties'])
 
             if 'retry' in info['text']: continue
 
-            rev = [x[1] for x in info['properties'] if x[0] == 'revision'][0]
-            if not rev: continue
+            if not props['revision']: continue
 
-            try: state, repo_label = find_state(rev)
+            try: state, repo_label = find_state(props['revision'])
             except ValueError:
-                g.logger.debug('Invalid commit ID from Buildbot: {}'.format(rev))
+                g.logger.debug('Invalid commit ID from Buildbot: {}'.format(props['revision']))
                 continue
 
             if info['builderName'] not in state.build_res:
@@ -339,17 +339,18 @@ def buildbot():
             url = '{}/builders/{}/builds/{}'.format(
                 repo_cfg['buildbot']['url'],
                 info['builderName'],
-                info['number'],
+                props['buildnumber'],
             )
 
             report_build_res(build_succ, url, info['builderName'], repo_label, state)
 
         elif row['event'] == 'buildStarted':
             info = row['payload']['build']
-            rev = [x[1] for x in info['properties'] if x[0] == 'revision'][0]
-            if not rev: continue
+            props = dict(x[:2] for x in info['properties'])
 
-            try: state, repo_label = find_state(rev)
+            if not props['revision']: continue
+
+            try: state, repo_label = find_state(props['revision'])
             except ValueError: pass
             else:
                 if info['builderName'] in state.build_res:
@@ -361,12 +362,12 @@ def buildbot():
                     url = '{}/builders/{}/builds/{}'.format(
                         repo_cfg['buildbot']['url'],
                         info['builderName'],
-                        info['number'],
+                        props['buildnumber'],
                     )
 
                     state.set_build_res(info['builderName'], None, url)
 
-            if g.buildbot_slots[0] == rev:
+            if g.buildbot_slots[0] == props['revision']:
                 g.buildbot_slots[0] = ''
 
                 g.queue_handler()
