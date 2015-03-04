@@ -164,6 +164,9 @@ class PullReqState:
 def sha_cmp(short, full):
     return len(short) >= 4 and short == full[:len(short)]
 
+def sha_or_blank(sha):
+    return sha if re.match(r'^[0-9a-f]+$', sha) else ''
+
 def parse_commands(body, username, repo_cfg, state, my_username, db, *, realtime=False, sha=''):
     if username not in repo_cfg['reviewers'] and username != my_username:
         return False
@@ -171,12 +174,12 @@ def parse_commands(body, username, repo_cfg, state, my_username, db, *, realtime
     state_changed = False
 
     words = list(chain.from_iterable(re.findall(r'\S+', x) for x in body.splitlines() if '@' + my_username in x))
-    for i, word in enumerate(words):
+    for i, word in reversed(list(enumerate(words))):
         found = True
 
         if word == 'r+' or word.startswith('r='):
             if not sha and i+1 < len(words):
-                cur_sha = words[i+1]
+                cur_sha = sha_or_blank(words[i+1])
             else:
                 cur_sha = sha
 
@@ -189,7 +192,8 @@ def parse_commands(body, username, repo_cfg, state, my_username, db, *, realtime
                     msg = '`{}` is not a valid commit SHA.'.format(cur_sha)
                     state.add_comment(':scream_cat: {} Please try again with `{:.7}`.'.format(msg, state.head_sha))
                 else:
-                    state.add_comment('@{} r={} {:.7}'.format(my_username, approver, state.head_sha))
+                    assert sha_or_blank(state.head_sha)
+                    state.add_comment('~~[]() @{} r={} {:.7} []()~~'.format(my_username, approver, state.head_sha))
 
         elif word == 'r-':
             state.approved_by = ''
@@ -239,6 +243,8 @@ def parse_commands(body, username, repo_cfg, state, my_username, db, *, realtime
 
         if found:
             state_changed = True
+
+            words[i] = ''
 
     return state_changed
 
