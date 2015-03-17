@@ -184,13 +184,12 @@ def parse_commands(body, username, repo_cfg, state, my_username, db, *, realtime
 
             if sha_cmp(cur_sha, state.head_sha):
                 state.approved_by = approver
-            elif realtime:
+            elif realtime and username != my_username:
                 if cur_sha:
                     msg = '`{}` is not a valid commit SHA.'.format(cur_sha)
                     state.add_comment(':scream_cat: {} Please try again with `{:.7}`.'.format(msg, state.head_sha))
                 else:
-                    assert sha_or_blank(state.head_sha)
-                    state.add_comment('~~[]() @{} r={} {:.7} []()~~'.format(my_username, approver, state.head_sha))
+                    state.add_comment(':pushpin: Commit {:.7} has been approved by `{}`\n\n<!-- @{} r={} {} -->'.format(state.head_sha, approver, my_username, approver, state.head_sha))
 
         elif word == 'r-':
             state.approved_by = ''
