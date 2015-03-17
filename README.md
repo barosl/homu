@@ -81,15 +81,16 @@ pip install -e homu
 
 1. Copy `cfg.sample.toml` to `cfg.toml`, and edit it accordingly.
 
-2. Create a GitHub account that will be used by Homu. You can also use the
-   existing account. In the account settings, register a new application and
-   generate a new access token.
+2. Create a GitHub account that will be used by Homu. You can also use an
+   existing account. In the [account settings][settings], register a new
+   application and generate a new access token (with the `repo` permission).
 
 3. Add a Webhook to your repository:
 
  - Payload URL: `http://HOST:PORT/github`
  - Content type: `application/json`
  - Secret: The same as `repo.NAME.github.secret` in cfg.toml
+ - Events: Issue Comment, Pull Request, Push
 
 4. Add a Webhook to your continuous integration service:
 
@@ -108,6 +109,7 @@ pip install -e homu
 
  - Travis CI
 
+   Add [your Travis token][travis] as `repo.NAME.travis.token` in cfg.toml.
    Insert the following code to the `.travis.yml` file:
 
     ```yaml
@@ -118,6 +120,9 @@ pip install -e homu
         only:
             - auto
     ```
+
+[settings]: https://github.com/settings/applications
+[travis]: https://travis-ci.org/profile/info
 
 ### How to run
 
