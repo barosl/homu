@@ -29,6 +29,8 @@
 
         <h2>Homu Cheatsheet</h2>
 
+        <h3>Commands</h3>
+
         <p>
             Here's a quick reference for the commands Homu accepts. Commands must be posted as
             comments on the PR they refer to. Comments may include multiple commands. Homu will
@@ -37,24 +39,39 @@
         </p>
 
         <ul>
-            <li><code>r+ SHA</code>: Accept a PR where the last commit has the given SHA prefix. If you omit the SHA, the last commit at the time of writing is chosen</li>
-            <li><code>r=NAME SHA</code>: Accept a PR on the behalf of NAME</li>
-            <li><code>r-</code>: Unacccept a PR</li>
-            <li><code>p=NUMBER</code>: Set the priority of the accepted PR (defaults to 0)</li>
-            <li><code>rollup</code>: Mark the PR as likely to merge without issue, implies <code>p=-1</code></li>
-            <li><code>rollup-</code>: Unmark the PR as <code>rollup</code></li>
-            <li><code>retry</code>: Signal that the PR is not bad, and should be retried by buildbot</li>
-            <li><code>try</code>: Request that the PR be tested by buildbot, without accepting it</li>
-            <li><code>force</code>: Stop all the builds on the configured builders, and proceed to the next PR</li>
-            <li><code>clean</code>: Clean up the previous build results</li>
+            <li><code>r+ (SHA)</code>: Accept a PR. Optionally, the SHA of the last commit in the PR can be provided as a guard against synchronization issues or mallicious users. Regardless of the form used, PRs will automatically be unaccepted if the contents are changed.</li>
+            <li><code>r=NAME (SHA)</code>: Accept a PR on the behalf of NAME.</li>
+            <li><code>r-</code>: Unacccept a PR.</li>
+            <li><code>p=NUMBER</code>: Set the priority of the accepted PR (defaults to 0).</li>
+            <li><code>rollup</code>: Mark the PR as likely to merge without issue, implies <code>p=-1.</code></li>
+            <li><code>rollup-</code>: Unmark the PR as <code>rollup</code>.</li>
+            <li><code>retry</code>: Signal that the PR is not bad, and should be retried by buildbot.</li>
+            <li><code>try</code>: Request that the PR be tested by buildbot, without accepting it.</li>
+            <li><code>force</code>: Stop all the builds on the configured builders, and proceed to the next PR.</li>
+            <li><code>clean</code>: Clean up the previous build results.</li>
         </ul>
 
-        <h3>Examples</h3>
+        <h4>Examples</h4>
 
         <ul>
-            <li><code>@homu r+ 123456 p=1</code></li>
-            <li><code>@homu r=barosl 123456 rollup</code></li>
+            <li><code>@homu r+ p=1</code></li>
+            <li><code>@homu r+ 123456</code></li>
+            <li><code>@homu r=barosl rollup</code></li>
             <li><code>@homu retry</code></li>
         </ul>
+
+        <h3>Customizing the Queue's Contents</h3>
+
+        <p>
+            Homu provides a few simple ways to customize the queue's contents to fit your needs:
+        </p>
+
+        <ul>
+            <li><a href="queue/rust+cargo">queue/rust+cargo</a> will combine the queues of the <code>rust</code> and <code>cargo</code> repos (for example).</li>
+            <li><a href="queue/all">queue/all</a> will combine the queues of all registered repos.</li>
+            <li>Rows can be sorted by column by clicking on column headings.</li>
+            <li>Rows can be filtered by contents using the search box (only naive substring matching supported).</li>
+        </ul>
+
     </body>
 </html>
