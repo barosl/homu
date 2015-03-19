@@ -1,3 +1,4 @@
+import argparse
 import github3
 import toml
 import json
@@ -439,9 +440,20 @@ def fetch_mergeability(mergeable_que):
         finally:
             mergeable_que.task_done()
 
+def arguments():
+    parser = argparse.ArgumentParser(description =
+                                     'A bot that integrates with GitHub and '
+                                     'your favorite continuous integration service')
+    parser.add_argument('-v', '--verbose',
+                        action='store_true', help='Enable more verbose logging')
+
+    return parser.parse_args()
+
 def main():
+    args = arguments()
+
     logger = logging.getLogger('homu')
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging.DEBUG if args.verbose else logging.INFO)
     logger.addHandler(logging.StreamHandler())
 
     with open('cfg.toml') as fp:
