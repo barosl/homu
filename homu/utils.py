@@ -31,3 +31,13 @@ def github_create_status(repo, sha, state, target_url='', description='', *,
     url = repo._build_url('statuses', sha, base_url=repo._api)
     js = repo._json(repo._post(url, data=data), 201)
     return Status(js) if js else None
+
+def remove_url_keys_from_json(json):
+    if isinstance(json, dict):
+        return {key: remove_url_keys_from_json(value)
+                for key, value in json.items()
+                if not key.endswith('url')}
+    elif isinstance(json, list):
+        return [remove_url_keys_from_json(value) for value in json]
+    else:
+        return json

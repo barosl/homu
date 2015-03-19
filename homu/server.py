@@ -29,6 +29,10 @@ def index():
 
 @get('/queue/<repo_label>')
 def queue(repo_label):
+    logger = g.logger.getChild('queue')
+
+    logger.debug('repo_label: %s', repo_label)
+
     if repo_label == 'all':
         labels = g.repos.keys()
     else:
@@ -67,10 +71,14 @@ def queue(repo_label):
 
 @get('/rollup')
 def rollup():
+    logger = g.logger.getChild('rollup')
+
     response.content_type = 'text/plain'
 
     code = request.query.code
     state = json.loads(request.query.state)
+
+    logger.debug('state: %s', state)
 
     res = requests.post('https://github.com/login/oauth/access_token', data={
         'client_id': g.cfg['github']['app_client_id'],
@@ -147,10 +155,13 @@ def rollup():
 
 @post('/github')
 def github():
+    logger = g.logger.getChild('github')
+
     response.content_type = 'text/plain'
 
     payload = request.body.read()
     info = request.json
+    logger.debug('info: %s', utils.remove_url_keys_from_json(info))
 
     owner_info = info['repository']['owner']
     owner = owner_info.get('login') or owner_info['name']
@@ -240,7 +251,7 @@ def github():
             state.assignee = info['pull_request']['assignee']['login'] if info['pull_request']['assignee'] else ''
 
         else:
-            g.logger.debug('Invalid pull_request action: {}'.format(action))
+            logger.debug('Invalid pull_request action: {}'.format(action))
 
     elif event_type == 'push':
         ref = info['ref'][len('refs/heads/'):]
@@ -279,7 +290,10 @@ def github():
 
     return 'OK'
 
-def report_build_res(succ, url, builder, repo_label, state):
+def report_build_res(succ, url, builder, repo_label, state, logger):
+    logger.debug('build result %s: builder = %s, succ = %s, current build_res = %s',
+                 state, builder, succ, state.build_res)
+
     state.set_build_res(builder, succ, url)
 
     if succ:
@@ -317,7 +331,10 @@ def report_build_res(succ, url, builder, repo_label, state):
 
 @post('/buildbot')
 def buildbot():
+    logger = g.logger.getChild('buildbot')
+
     response.content_type = 'text/plain'
+    logger.debug('info: %s', info)
 
     for row in json.loads(request.forms.packets):
         if row['event'] == 'buildFinished':
@@ -330,11 +347,11 @@ def buildbot():
 
             try: state, repo_label = find_state(props['revision'])
             except ValueError:
-                g.logger.debug('Invalid commit ID from Buildbot: {}'.format(props['revision']))
+                logger.debug('Invalid commit ID from Buildbot: {}'.format(props['revision']))
                 continue
 
             if info['builderName'] not in state.build_res:
-                g.logger.debug('Invalid builder from Buildbot: {}'.format(info['builderName']))
+                logger.debug('Invalid builder from Buildbot: {}'.format(info['builderName']))
                 continue
 
             repo_cfg = g.repo_cfgs[repo_label]
@@ -383,9 +400,9 @@ def buildbot():
                         continue
 
                 else:
-                    g.logger.error('Corrupt payload from Buildbot')
+                    logger.error('Corrupt payload from Buildbot')
 
-            report_build_res(build_succ, url, info['builderName'], repo_label, state)
+            report_build_res(build_succ, url, info['builderName'], repo_label, state, logger)
 
         elif row['event'] == 'buildStarted':
             info = row['payload']['build']
@@ -419,24 +436,34 @@ def buildbot():
 
 @post('/travis')
 def travis():
+    logger = g.logger.getChild('travis')
+
     info = json.loads(request.forms.payload)
+    logger.debug('info: %s', utils.remove_url_keys_from_json(info))
 
     try: state, repo_label = find_state(info['commit'])
     except ValueError:
-        g.logger.debug('Invalid commit ID from Travis: {}'.format(info['commit']))
+        logger.debug('Invalid commit ID from Travis: {}'.format(info['commit']))
         return 'OK'
 
+    logger.debug('state: %s, %s', state, state.build_res)
     if 'travis' not in state.build_res:
+        logger.debug('travis is not a monitored target for %s', state)
         return 'OK'
 
     token = g.repo_cfgs[repo_label]['travis']['token']
     code = hashlib.sha256(('{}/{}{}'.format(state.repo.owner.login, state.repo.name, token)).encode('utf-8')).hexdigest()
     if request.headers['Authorization'] != code:
+        # this isn't necessarily an error, e.g. maybe someone is
+        # fabricating travis notifications to try to trick Homu, but,
+        # I imagine that this will most often occur because a repo is
+        # misconfigured.
+        logger.warn('authorisation failed for %s, maybe the repo has the wrong travis token?',
+                    state)
         abort(400, 'Authorization failed')
 
     succ = info['result'] == 0
-
-    report_build_res(succ, info['build_url'], 'travis', repo_label, state)
+    report_build_res(succ, info['build_url'], 'travis', repo_label, state, logger)
 
     return 'OK'
 
@@ -454,7 +481,7 @@ def start(cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots, 
     g.queue_handler = queue_handler
     g.repo_cfgs = repo_cfgs
     g.repos = repos
-    g.logger = logger
+    g.logger = logger.getChild('server')
     g.buildbot_slots = buildbot_slots
     g.tpls = tpls
     g.my_username = my_username
