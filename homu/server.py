@@ -3,6 +3,7 @@ import json
 import urllib.parse
 from .main import PullReqState, parse_commands, db_query, INTERRUPTED_BY_HOMU_RE
 from . import utils
+from .utils import lazy_debug
 import github3
 import jinja2
 import requests
@@ -31,7 +32,7 @@ def index():
 def queue(repo_label):
     logger = g.logger.getChild('queue')
 
-    logger.debug('repo_label: %s', repo_label)
+    lazy_debug(logger, lambda: 'repo_label: {}'.format(repo_label))
 
     if repo_label == 'all':
         labels = g.repos.keys()
@@ -78,7 +79,7 @@ def rollup():
     code = request.query.code
     state = json.loads(request.query.state)
 
-    logger.debug('state: %s', state)
+    lazy_debug(logger, lambda: 'state: {}'.format(state))
 
     res = requests.post('https://github.com/login/oauth/access_token', data={
         'client_id': g.cfg['github']['app_client_id'],
@@ -161,7 +162,8 @@ def github():
 
     payload = request.body.read()
     info = request.json
-    logger.debug('info: %s', utils.remove_url_keys_from_json(info))
+
+    lazy_debug(logger, lambda: 'info: {}'.format(utils.remove_url_keys_from_json(info)))
 
     owner_info = info['repository']['owner']
     owner = owner_info.get('login') or owner_info['name']
@@ -251,7 +253,7 @@ def github():
             state.assignee = info['pull_request']['assignee']['login'] if info['pull_request']['assignee'] else ''
 
         else:
-            logger.debug('Invalid pull_request action: {}'.format(action))
+            lazy_debug(logger, lambda: 'Invalid pull_request action: {}'.format(action))
 
     elif event_type == 'push':
         ref = info['ref'][len('refs/heads/'):]
@@ -291,8 +293,9 @@ def github():
     return 'OK'
 
 def report_build_res(succ, url, builder, repo_label, state, logger):
-    logger.debug('build result %s: builder = %s, succ = %s, current build_res = %s',
-                 state, builder, succ, state.build_res)
+    lazy_debug(logger,
+               lambda: 'build result {}: builder = {}, succ = {}, current build_res = {}'
+                            .format(state, builder, succ, state.build_res_summary()))
 
     state.set_build_res(builder, succ, url)
 
@@ -334,7 +337,8 @@ def buildbot():
     logger = g.logger.getChild('buildbot')
 
     response.content_type = 'text/plain'
-    logger.debug('info: %s', info)
+
+    lazy_debug(logger, lambda: 'info: {}'.format(info))
 
     for row in json.loads(request.forms.packets):
         if row['event'] == 'buildFinished':
@@ -347,11 +351,15 @@ def buildbot():
 
             try: state, repo_label = find_state(props['revision'])
             except ValueError:
-                logger.debug('Invalid commit ID from Buildbot: {}'.format(props['revision']))
+                lazy_debug(logger,
+                           lambda: 'Invalid commit ID from Buildbot: {}'.format(props['revision']))
                 continue
 
+            lazy_debug(logger, lambda: 'state: {}, {}'.format(state, state.build_res_summary()))
+
             if info['builderName'] not in state.build_res:
-                logger.debug('Invalid builder from Buildbot: {}'.format(info['builderName']))
+                lazy_debug(logger,
+                           lambda: 'Invalid builder from Buildbot: {}'.format(info['builderName']))
                 continue
 
             repo_cfg = g.repo_cfgs[repo_label]
@@ -439,16 +447,18 @@ def travis():
     logger = g.logger.getChild('travis')
 
     info = json.loads(request.forms.payload)
-    logger.debug('info: %s', utils.remove_url_keys_from_json(info))
+
+    lazy_debug(logger, lambda: 'info: {}'.format(utils.remove_url_keys_from_json(info)))
 
     try: state, repo_label = find_state(info['commit'])
     except ValueError:
-        logger.debug('Invalid commit ID from Travis: {}'.format(info['commit']))
+        lazy_debug(logger, lambda: 'Invalid commit ID from Travis: {}'.format(info['commit']))
         return 'OK'
 
-    logger.debug('state: %s, %s', state, state.build_res)
+    lazy_debug(logger, lambda: 'state: {}, {}'.format(state, state.build_res_summary()))
+
     if 'travis' not in state.build_res:
-        logger.debug('travis is not a monitored target for %s', state)
+        lazy_debug(logger, lambda: 'travis is not a monitored target for %s', state)
         return 'OK'
 
     token = g.repo_cfgs[repo_label]['travis']['token']
@@ -463,6 +473,7 @@ def travis():
         abort(400, 'Authorization failed')
 
     succ = info['result'] == 0
+
     report_build_res(succ, info['build_url'], 'travis', repo_label, state, logger)
 
     return 'OK'

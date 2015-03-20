@@ -161,6 +161,10 @@ class PullReqState:
             self.merge_sha,
         ])
 
+    def build_res_summary(self):
+        return ', '.join('{}: {}'.format(builder, data['res'])
+                         for builder, data in self.build_res.items())
+
 def sha_cmp(short, full):
     return len(short) >= 4 and short == full[:len(short)]
 

@@ -1,5 +1,6 @@
 import json
 import github3
+import logging
 
 def github_set_ref(repo, ref, sha, *, force=False, auto_create=True):
     url = repo._build_url('git', 'refs', ref, base_url=repo._api)
@@ -41,3 +42,7 @@ def remove_url_keys_from_json(json):
         return [remove_url_keys_from_json(value) for value in json]
     else:
         return json
+
+def lazy_debug(logger, f):
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(f())
