@@ -1,22 +1,32 @@
 [github]
 
+# Information for securely interacting with GitHub. These are found/generated
+# under <https://github.com/settings/applications>.
+
+# A GitHub personal access token
 access_token = ""
 
+# A GitHub oauth application for this instance of homu:
 app_client_id = ""
 app_client_secret = ""
 
 [web]
 
+# The port homu listens on
 port = 54856
 
-[repo.test]
+# An example configuration for repository (there can be many of these)
+[repo.NAME]
 
+# github.com/<owner>/<name>
 owner = ""
 name = ""
 
+# who has r+ rights?
 reviewers = ["barosl", "graydon"]
 
-#[repo.test.branch]
+## branch names (these settings here are the defaults)
+#[repo.NAME.branch]
 #
 #master = "master"
 #auto = "auto"
@@ -24,11 +34,13 @@ reviewers = ["barosl", "graydon"]
 #tmp = "tmp"
 #rollup = "rollup"
 
-[repo.test.github]
+[repo.NAME.github]
 
+# arbitrary secret (e.g. openssl rand -hex 20)
 secret = ""
 
-#[repo.test.buildbot]
+## Use buildbot for running tests
+#[repo.NAME.buildbot]
 #
 #url = ""
 #secret = ""
@@ -39,6 +51,8 @@ secret = ""
 #username = ""
 #password = ""
 
-#[repo.test.travis]
+## Use travis for running tests
+#[repo.NAME.travis]
 #
+## found under <https://travis-ci.org/profile/info>.
 #token = ""
