@@ -1,3 +1,4 @@
+import argparse
 import github3
 import toml
 import json
@@ -79,7 +80,9 @@ class PullReqState:
             self.init_build_res([])
 
     def __repr__(self):
-        return 'PullReqState#{}(approved_by={}, priority={}, status={})'.format(
+        return 'PullReqState:{}/{}#{}(approved_by={}, priority={}, status={})'.format(
+            self.repo.owner.login,
+            self.repo.name,
             self.num,
             self.approved_by,
             self.priority,
@@ -157,6 +160,10 @@ class PullReqState:
             url,
             self.merge_sha,
         ])
+
+    def build_res_summary(self):
+        return ', '.join('{}: {}'.format(builder, data['res'])
+                         for builder, data in self.build_res.items())
 
 def sha_cmp(short, full):
     return len(short) >= 4 and short == full[:len(short)]
@@ -303,7 +310,9 @@ def start_build(state, repo_cfgs, buildbot_slots, logger, db):
     if 'buildbot' in repo_cfg:
         buildbot_slots[0] = state.merge_sha
 
-    logger.info('Starting build of #{} on {}: {}'.format(state.num, branch, state.merge_sha))
+    logger.info('Starting build of {}/{}#{} on {}: {}'.format(state.repo.owner.login,
+                                                              state.repo.name,
+                                                              state.num, branch, state.merge_sha))
 
     state.set_status('pending')
     desc = '{} commit {:.7} with merge {:.7}...'.format('Trying' if state.try_ else 'Testing', state.head_sha, state.merge_sha)
@@ -439,9 +448,20 @@ def fetch_mergeability(mergeable_que):
         finally:
             mergeable_que.task_done()
 
+def arguments():
+    parser = argparse.ArgumentParser(description =
+                                     'A bot that integrates with GitHub and '
+                                     'your favorite continuous integration service')
+    parser.add_argument('-v', '--verbose',
+                        action='store_true', help='Enable more verbose logging')
+
+    return parser.parse_args()
+
 def main():
+    args = arguments()
+
     logger = logging.getLogger('homu')
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging.DEBUG if args.verbose else logging.INFO)
     logger.addHandler(logging.StreamHandler())
 
     with open('cfg.toml') as fp:
