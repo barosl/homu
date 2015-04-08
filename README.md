@@ -84,6 +84,8 @@ pip install -e homu
 2. Create a GitHub account that will be used by Homu. You can also use an
    existing account. In the [account settings][settings], register a new
    application and generate a new access token (with the `repo` permission).
+   The OAuth Callback URL should be `http://HOST:PORT/rollup`, the homepage URL
+   isn't needed and can be anything, for example `http://HOST:PORT/`.
 
 3. Add a Webhook to your repository:
 
