@@ -54,16 +54,19 @@ class PullReqState:
     base_ref = ''
     assignee = ''
 
-    def __init__(self, num, head_sha, status, repo, db, repo_label, mergeable_que):
+    def __init__(self, num, head_sha, status, db, repo_label, mergeable_que, gh, owner, name, repos):
         self.head_advanced('', use_db=False)
 
         self.num = num
         self.head_sha = head_sha
         self.status = status
-        self.repo = repo
         self.db = db
         self.repo_label = repo_label
         self.mergeable_que = mergeable_que
+        self.gh = gh
+        self.owner = owner
+        self.name = name
+        self.repos = repos
 
     def head_advanced(self, head_sha, *, use_db=True):
         self.head_sha = head_sha
@@ -81,8 +84,8 @@ class PullReqState:
 
     def __repr__(self):
         return 'PullReqState:{}/{}#{}(approved_by={}, priority={}, status={})'.format(
-            self.repo.owner.login,
-            self.repo.name,
+            self.owner,
+            self.name,
             self.num,
             self.approved_by,
             self.priority,
@@ -105,18 +108,18 @@ class PullReqState:
     def add_comment(self, text):
         issue = getattr(self, 'issue', None)
         if not issue:
-            issue = self.issue = self.repo.issue(self.num)
+            issue = self.issue = self.get_repo().issue(self.num)
 
         issue.create_comment(text)
 
     def set_status(self, status):
         self.status = status
 
-        db_query(self.db, 'INSERT OR REPLACE INTO state (repo, num, status) VALUES (?, ?, ?)', [self.repo_label, self.num, self.status])
+        db_query(self.db, 'UPDATE pull SET status = ? WHERE repo = ? AND num = ?', [self.status, self.repo_label, self.num])
 
         # FIXME: self.try_ should also be saved in the database
         if not self.try_:
-            db_query(self.db, 'UPDATE state SET merge_sha = ? WHERE repo = ? AND num = ?', [self.merge_sha, self.repo_label, self.num])
+            db_query(self.db, 'UPDATE pull SET merge_sha = ? WHERE repo = ? AND num = ?', [self.merge_sha, self.repo_label, self.num])
 
     def get_status(self):
         return 'approved' if self.status == '' and self.approved_by and self.mergeable is not False else self.status
@@ -165,6 +168,33 @@ class PullReqState:
         return ', '.join('{}: {}'.format(builder, data['res'])
                          for builder, data in self.build_res.items())
 
+    def get_repo(self):
+        repo = self.repos[self.repo_label]
+        if not repo:
+            self.repos[self.repo_label] = repo = self.gh.repository(self.owner, self.name)
+
+            assert repo.owner.login == self.owner
+            assert repo.name == self.name
+        return repo
+
+    def save(self):
+        db_query(self.db, 'INSERT OR REPLACE INTO pull (repo, num, status, merge_sha, title, body, head_sha, head_ref, base_ref, assignee, approved_by, priority, try_, rollup) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [
+            self.repo_label,
+            self.num,
+            self.status,
+            self.merge_sha,
+            self.title,
+            self.body,
+            self.head_sha,
+            self.head_ref,
+            self.base_ref,
+            self.assignee,
+            self.approved_by,
+            self.priority,
+            self.try_,
+            self.rollup,
+        ])
+
 def sha_cmp(short, full):
     return len(short) >= 4 and short == full[:len(short)]
 
@@ -191,6 +221,8 @@ def parse_commands(body, username, repo_cfg, state, my_username, db, *, realtime
 
             if sha_cmp(cur_sha, state.head_sha):
                 state.approved_by = approver
+
+                state.save()
             elif realtime and username != my_username:
                 if cur_sha:
                     msg = '`{}` is not a valid commit SHA.'.format(cur_sha)
@@ -201,9 +233,13 @@ def parse_commands(body, username, repo_cfg, state, my_username, db, *, realtime
         elif word == 'r-':
             state.approved_by = ''
 
+            state.save()
+
         elif word.startswith('p='):
             try: state.priority = int(word[len('p='):])
             except ValueError: pass
+
+            state.save()
 
         elif word == 'retry' and realtime:
             state.set_status('')
@@ -214,8 +250,12 @@ def parse_commands(body, username, repo_cfg, state, my_username, db, *, realtime
             state.merge_sha = ''
             state.init_build_res([])
 
+            state.save()
+
         elif word in ['rollup', 'rollup-']:
             state.rollup = word == 'rollup'
+
+            state.save()
 
         elif word == 'force' and realtime:
             with buildbot_sess(repo_cfg) as sess:
@@ -241,6 +281,8 @@ def parse_commands(body, username, repo_cfg, state, my_username, db, *, realtime
             state.merge_sha = ''
             state.init_build_res([])
 
+            state.save()
+
         else:
             found = False
 
@@ -252,9 +294,9 @@ def parse_commands(body, username, repo_cfg, state, my_username, db, *, realtime
     return state_changed
 
 def create_merge(state, repo_cfg):
-    master_sha = state.repo.ref('heads/' + repo_cfg.get('branch', {}).get('master', 'master')).object.sha
+    master_sha = state.get_repo().ref('heads/' + repo_cfg.get('branch', {}).get('master', 'master')).object.sha
     utils.github_set_ref(
-        state.repo,
+        state.get_repo(),
         'heads/' + repo_cfg.get('branch', {}).get('tmp', 'tmp'),
         master_sha,
         force=True,
@@ -266,13 +308,13 @@ def create_merge(state, repo_cfg):
         '<try>' if state.try_ else state.approved_by,
         state.body,
     )
-    try: merge_commit = state.repo.merge(repo_cfg.get('branch', {}).get('tmp', 'tmp'), state.head_sha, merge_msg)
+    try: merge_commit = state.get_repo().merge(repo_cfg.get('branch', {}).get('tmp', 'tmp'), state.head_sha, merge_msg)
     except github3.models.GitHubError as e:
         if e.code != 409: raise
 
         state.set_status('error')
         desc = 'Merge conflict'
-        utils.github_create_status(state.repo, state.head_sha, 'error', '', desc, context='homu')
+        utils.github_create_status(state.get_repo(), state.head_sha, 'error', '', desc, context='homu')
 
         state.add_comment(':lock: ' + desc)
 
@@ -284,7 +326,7 @@ def start_build(state, repo_cfgs, buildbot_slots, logger, db):
     if buildbot_slots[0]:
         return True
 
-    assert state.head_sha == state.repo.pull_request(state.num).head.sha
+    assert state.head_sha == state.get_repo().pull_request(state.num).head.sha
 
     repo_cfg = repo_cfgs[state.repo_label]
 
@@ -302,21 +344,23 @@ def start_build(state, repo_cfgs, buildbot_slots, logger, db):
     else:
         raise RuntimeError('Invalid configuration')
 
-    utils.github_set_ref(state.repo, 'heads/' + branch, merge_commit.sha, force=True)
+    utils.github_set_ref(state.get_repo(), 'heads/' + branch, merge_commit.sha, force=True)
 
     state.init_build_res(builders)
     state.merge_sha = merge_commit.sha
 
+    state.save()
+
     if 'buildbot' in repo_cfg:
         buildbot_slots[0] = state.merge_sha
 
-    logger.info('Starting build of {}/{}#{} on {}: {}'.format(state.repo.owner.login,
-                                                              state.repo.name,
+    logger.info('Starting build of {}/{}#{} on {}: {}'.format(state.owner,
+                                                              state.name,
                                                               state.num, branch, state.merge_sha))
 
     state.set_status('pending')
     desc = '{} commit {:.7} with merge {:.7}...'.format('Trying' if state.try_ else 'Testing', state.head_sha, state.merge_sha)
-    utils.github_create_status(state.repo, state.head_sha, 'pending', '', desc, context='homu')
+    utils.github_create_status(state.get_repo(), state.head_sha, 'pending', '', desc, context='homu')
 
     state.add_comment(':hourglass: ' + desc)
 
@@ -343,13 +387,13 @@ def start_rebuild(state, repo_cfgs):
     if not builders or not succ_builders:
         return False
 
-    master_sha = state.repo.ref('heads/' + repo_cfg.get('branch', {}).get('master', 'master')).object.sha
-    parent_shas = [x['sha'] for x in state.repo.commit(state.merge_sha).parents]
+    master_sha = state.get_repo().ref('heads/' + repo_cfg.get('branch', {}).get('master', 'master')).object.sha
+    parent_shas = [x['sha'] for x in state.get_repo().commit(state.merge_sha).parents]
 
     if master_sha not in parent_shas:
         return False
 
-    utils.github_set_ref(state.repo, 'tags/homu-tmp', state.merge_sha, force=True)
+    utils.github_set_ref(state.get_repo(), 'tags/homu-tmp', state.merge_sha, force=True)
 
     builders.sort()
     succ_builders.sort()
@@ -380,7 +424,7 @@ def start_rebuild(state, repo_cfgs):
     msg_3 = ' are reusable. Rebuilding'
     msg_4 = ' only {}'.format(', '.join('[{}]({})'.format(builder, url) for builder, url in builders))
 
-    utils.github_create_status(state.repo, state.head_sha, 'pending', '', '{}{}...'.format(msg_1, msg_3), context='homu')
+    utils.github_create_status(state.get_repo(), state.head_sha, 'pending', '', '{}{}...'.format(msg_1, msg_3), context='homu')
 
     state.add_comment(':zap: {}{}{}{}...'.format(msg_1, msg_2, msg_3, msg_4))
 
@@ -407,6 +451,8 @@ def process_queue(states, repos, repo_cfgs, logger, buildbot_slots, db):
             elif state.status == 'success' and state.try_ and state.approved_by:
                 state.try_ = False
 
+                state.save()
+
                 if start_build(state, repo_cfgs, buildbot_slots, logger, db):
                     return
 
@@ -422,10 +468,10 @@ def fetch_mergeability(mergeable_que):
         try:
             state, cause = mergeable_que.get()
 
-            mergeable = state.repo.pull_request(state.num).mergeable
+            mergeable = state.get_repo().pull_request(state.num).mergeable
             if mergeable is None:
                 time.sleep(5)
-                mergeable = state.repo.pull_request(state.num).mergeable
+                mergeable = state.get_repo().pull_request(state.num).mergeable
 
             if state.mergeable is True and mergeable is False:
                 if cause:
@@ -447,6 +493,64 @@ def fetch_mergeability(mergeable_que):
 
         finally:
             mergeable_que.task_done()
+
+def synchronize(repo_label, repo_cfg, logger, gh, states, repos, db, mergeable_que, my_username, repo_labels):
+    logger.info('Synchronizing {}...'.format(repo_label))
+
+    repo = gh.repository(repo_cfg['owner'], repo_cfg['name'])
+
+    repo_states = {}
+    repos[repo_label] = repo
+
+    for pull in repo.iter_pulls(state='open'):
+        db_query(db, 'SELECT status FROM pull WHERE repo = ? AND num = ?', [repo_label, pull.number])
+        row = db.fetchone()
+        if row:
+            status = row[0]
+        else:
+            status = ''
+            for info in utils.github_iter_statuses(repo, pull.head.sha):
+                if info.context == 'homu':
+                    status = info.state
+                    break
+
+        state = PullReqState(pull.number, pull.head.sha, status, db, repo_label, mergeable_que, gh, repo_cfg['owner'], repo_cfg['name'], repos)
+        state.title = pull.title
+        state.body = pull.body
+        state.head_ref = pull.head.repo[0] + ':' + pull.head.ref
+        state.base_ref = pull.base.ref
+        state.set_mergeable(None)
+        state.assignee = pull.assignee.login if pull.assignee else ''
+
+        for comment in pull.iter_comments():
+            if comment.original_commit_id == pull.head.sha:
+                parse_commands(
+                    comment.body,
+                    comment.user.login,
+                    repo_cfg,
+                    state,
+                    my_username,
+                    db,
+                    sha=comment.original_commit_id,
+                )
+
+        for comment in pull.iter_issue_comments():
+            parse_commands(
+                comment.body,
+                comment.user.login,
+                repo_cfg,
+                state,
+                my_username,
+                db,
+            )
+
+        state.save()
+
+        repo_states[pull.number] = state
+
+    states[repo_label] = repo_states
+
+    logger.info('Done synchronizing {}!'.format(repo_label))
 
 def arguments():
     parser = argparse.ArgumentParser(description =
@@ -480,11 +584,21 @@ def main():
     db_conn = sqlite3.connect('main.db', check_same_thread=False, isolation_level=None)
     db = db_conn.cursor()
 
-    db_query(db, '''CREATE TABLE IF NOT EXISTS state (
+    db_query(db, '''CREATE TABLE IF NOT EXISTS pull (
         repo TEXT NOT NULL,
         num INTEGER NOT NULL,
         status TEXT NOT NULL,
         merge_sha TEXT,
+        title TEXT,
+        body TEXT,
+        head_sha TEXT,
+        head_ref TEXT,
+        base_ref TEXT,
+        assignee TEXT,
+        approved_by TEXT,
+        priority INTEGER,
+        try_ INTEGER,
+        rollup INTEGER,
         UNIQUE (repo, num)
     )''')
 
@@ -505,82 +619,46 @@ def main():
         UNIQUE (repo, num)
     )''')
 
-    logger.info('Retrieving pull requests...')
-
     for repo_label, repo_cfg in cfg['repo'].items():
-        repo = gh.repository(repo_cfg['owner'], repo_cfg['name'])
-
-        states[repo_label] = {}
-        repos[repo_label] = repo
         repo_cfgs[repo_label] = repo_cfg
+        repo_labels[repo_cfg['owner'], repo_cfg['name']] = repo_label
 
-        for pull in repo.iter_pulls(state='open'):
-            db_query(db, 'SELECT status FROM state WHERE repo = ? AND num = ?', [repo_label, pull.number])
-            row = db.fetchone()
-            if row:
-                status = row[0]
-            else:
-                status = ''
-                for info in utils.github_iter_statuses(repo, pull.head.sha):
-                    if info.context == 'homu':
-                        status = info.state
-                        break
+        repo_states = {}
+        repos[repo_label] = None
 
-                db_query(db, 'INSERT INTO state (repo, num, status) VALUES (?, ?, ?)', [repo_label, pull.number, status])
-
-            state = PullReqState(pull.number, pull.head.sha, status, repo, db, repo_label, mergeable_que)
-            state.title = pull.title
-            state.body = pull.body
-            state.head_ref = pull.head.repo[0] + ':' + pull.head.ref
-            state.base_ref = pull.base.ref
+        db_query(db, 'SELECT num, head_sha, status, title, body, head_ref, base_ref, assignee, approved_by, priority, try_, rollup, merge_sha FROM pull WHERE repo = ?', [repo_label])
+        for num, head_sha, status, title, body, head_ref, base_ref, assignee, approved_by, priority, try_, rollup, merge_sha in db.fetchall():
+            state = PullReqState(num, head_sha, status, db, repo_label, mergeable_que, gh, repo_cfg['owner'], repo_cfg['name'], repos)
+            state.title = title
+            state.body = body
+            state.head_ref = head_ref
+            state.base_ref = base_ref
             state.set_mergeable(None)
-            state.assignee = pull.assignee.login if pull.assignee else ''
+            state.assignee = assignee
 
-            for comment in pull.iter_comments():
-                if comment.original_commit_id == pull.head.sha:
-                    parse_commands(
-                        comment.body,
-                        comment.user.login,
-                        repo_cfg,
-                        state,
-                        my_username,
-                        db,
-                        sha=comment.original_commit_id,
-                    )
+            state.approved_by = approved_by
+            state.priority = int(priority)
+            state.try_ = bool(try_)
+            state.rollup = bool(rollup)
 
-            for comment in pull.iter_issue_comments():
-                parse_commands(
-                    comment.body,
-                    comment.user.login,
-                    repo_cfg,
-                    state,
-                    my_username,
-                    db,
-                )
+            if merge_sha:
+                if 'buildbot' in repo_cfg:
+                    builders = repo_cfg['buildbot']['builders']
+                else:
+                    builders = ['travis']
 
-            states[repo_label][pull.number] = state
+                state.init_build_res(builders, use_db=False)
+                state.merge_sha = merge_sha
 
-        repo_labels[repo.owner.login, repo.name] = repo_label
+            elif state.status == 'pending':
+                # FIXME: There might be a better solution
+                state.status = ''
 
-    db_query(db, 'SELECT repo, num, merge_sha FROM state')
-    for repo_label, num, merge_sha in db.fetchall():
-        try: state = states[repo_label][num]
-        except KeyError:
-            db_query(db, 'DELETE FROM state WHERE repo = ? AND num = ?', [repo_label, num])
-            continue
+                state.save()
 
-        if merge_sha:
-            if 'buildbot' in repo_cfgs[repo_label]:
-                builders = repo_cfgs[repo_label]['buildbot']['builders']
-            else:
-                builders = ['travis']
+            repo_states[num] = state
 
-            state.init_build_res(builders, use_db=False)
-            state.merge_sha = merge_sha
-
-        elif state.status == 'pending':
-            # FIXME: There might be a better solution
-            state.status = ''
+        states[repo_label] = repo_states
 
     db_query(db, 'SELECT repo, num, builder, res, url, merge_sha FROM build_res')
     for repo_label, num, builder, res, url, merge_sha in db.fetchall():
@@ -606,15 +684,13 @@ def main():
 
         state.mergeable = bool(mergeable) if mergeable is not None else None
 
-    logger.info('Done!')
-
     queue_handler_lock = Lock()
     def queue_handler():
         with queue_handler_lock:
             return process_queue(states, repos, repo_cfgs, logger, buildbot_slots, db)
 
     from . import server
-    Thread(target=server.start, args=[cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots, my_username, db, repo_labels, mergeable_que]).start()
+    Thread(target=server.start, args=[cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots, my_username, db, repo_labels, mergeable_que, gh]).start()
 
     Thread(target=fetch_mergeability, args=[mergeable_que]).start()
 

@@ -1,7 +1,7 @@
 import hmac
 import json
 import urllib.parse
-from .main import PullReqState, parse_commands, db_query, INTERRUPTED_BY_HOMU_RE
+from .main import PullReqState, parse_commands, db_query, INTERRUPTED_BY_HOMU_RE, synchronize
 from . import utils
 from .utils import lazy_debug
 import github3
@@ -10,6 +10,7 @@ import requests
 import pkg_resources
 from bottle import get, post, run, request, redirect, abort, response
 import hashlib
+from threading import Thread
 
 import bottle; bottle.BaseRequest.MEMFILE_MAX = 1024 * 1024 * 10
 
@@ -23,6 +24,15 @@ def find_state(sha):
                 return state, repo_label
 
     raise ValueError('Invalid SHA')
+
+def get_repo(repo_label, repo_cfg):
+    repo = g.repos[repo_label]
+    if not repo:
+        g.repos[repo_label] = repo = g.gh.repository(repo_cfg['owner'], repo_cfg['name'])
+
+        assert repo.owner.login == repo_cfg['owner']
+        assert repo.name == repo_cfg['name']
+    return repo
 
 @get('/')
 def index():
@@ -51,7 +61,7 @@ def queue(repo_label):
             'status': state.get_status(),
             'status_ext': ' (try)' if state.try_ else '',
             'priority': 'rollup' if state.rollup else state.priority,
-            'url': 'https://github.com/{}/{}/pull/{}'.format(state.repo.owner.login, state.repo.name, state.num),
+            'url': 'https://github.com/{}/{}/pull/{}'.format(state.owner, state.name, state.num),
             'num': state.num,
             'approved_by': state.approved_by,
             'title': state.title,
@@ -70,9 +80,9 @@ def queue(repo_label):
         failed = len([x for x in pull_states if x.status == 'failure' or x.status == 'error']),
     )
 
-@get('/rollup')
-def rollup():
-    logger = g.logger.getChild('rollup')
+@get('/callback')
+def callback():
+    logger = g.logger.getChild('callback')
 
     response.content_type = 'text/plain'
 
@@ -90,10 +100,19 @@ def rollup():
     token = args['access_token'][0]
 
     repo_label = state['repo_label']
-    repo = g.repos[repo_label]
     repo_cfg = g.repo_cfgs[repo_label]
+    repo = get_repo(repo_label, repo_cfg)
 
     user_gh = github3.login(token=token)
+
+    if state['cmd'] == 'rollup':
+        return rollup(user_gh, state, repo_label, repo_cfg, repo)
+    elif state['cmd'] == 'synch':
+        return synch(user_gh, state, repo_label, repo_cfg, repo)
+    else:
+        abort(400, 'Invalid command')
+
+def rollup(user_gh, state, repo_label, repo_cfg, repo):
     user_repo = user_gh.repository(user_gh.user().login, repo.name)
     base_repo = user_gh.repository(repo.owner.login, repo.name)
 
@@ -190,16 +209,20 @@ def github():
             body = info['comment']['body']
             username = info['sender']['login']
 
+            state = g.states[repo_label][pull_num]
+
             if parse_commands(
                 body,
                 username,
                 repo_cfg,
-                g.states[repo_label][pull_num],
+                state,
                 g.my_username,
                 g.db,
                 realtime=True,
                 sha=original_commit_id,
             ):
+                state.save()
+
                 g.queue_handler()
 
     elif event_type == 'pull_request':
@@ -211,8 +234,10 @@ def github():
             state = g.states[repo_label][pull_num]
             state.head_advanced(head_sha)
 
+            state.save()
+
         elif action in ['opened', 'reopened']:
-            state = PullReqState(pull_num, head_sha, '', g.repos[repo_label], g.db, repo_label, g.mergeable_que)
+            state = PullReqState(pull_num, head_sha, '', g.db, repo_label, g.mergeable_que, g.gh, info['repository']['owner']['login'], info['repository']['name'], g.repos)
             state.title = info['pull_request']['title']
             state.body = info['pull_request']['body']
             state.head_ref = info['pull_request']['head']['repo']['owner']['login'] + ':' + info['pull_request']['head']['ref']
@@ -224,7 +249,7 @@ def github():
 
             if action == 'reopened':
                 # FIXME: Review comments are ignored here
-                for comment in g.repos[repo_label].issue(pull_num).iter_comments():
+                for comment in get_repo(repo_label, repo_cfg).issue(pull_num).iter_comments():
                     found = parse_commands(
                         comment.body,
                         comment.user.login,
@@ -234,6 +259,8 @@ def github():
                         g.db,
                     ) or found
 
+            state.save()
+
             g.states[repo_label][pull_num] = state
 
             if found:
@@ -242,7 +269,7 @@ def github():
         elif action == 'closed':
             del g.states[repo_label][pull_num]
 
-            db_query(g.db, 'DELETE FROM state WHERE repo = ? AND num = ?', [repo_label, pull_num])
+            db_query(g.db, 'DELETE FROM pull WHERE repo = ? AND num = ?', [repo_label, pull_num])
             db_query(g.db, 'DELETE FROM build_res WHERE repo = ? AND num = ?', [repo_label, pull_num])
             db_query(g.db, 'DELETE FROM mergeable WHERE repo = ? AND num = ?', [repo_label, pull_num])
 
@@ -251,6 +278,8 @@ def github():
         elif action in ['assigned', 'unassigned']:
             state = g.states[repo_label][pull_num]
             state.assignee = info['pull_request']['assignee']['login'] if info['pull_request']['assignee'] else ''
+
+            state.save()
 
         else:
             lazy_debug(logger, lambda: 'Invalid pull_request action: {}'.format(action))
@@ -267,6 +296,8 @@ def github():
 
             if state.head_sha == info['before']:
                 state.head_advanced(info['after'])
+
+                state.save()
 
     elif event_type == 'issue_comment':
         body = info['comment']['body']
@@ -288,6 +319,8 @@ def github():
                 g.db,
                 realtime=True,
             ):
+                state.save()
+
                 g.queue_handler()
 
     return 'OK'
@@ -303,7 +336,7 @@ def report_build_res(succ, url, builder, repo_label, state, logger):
         if all(x['res'] for x in state.build_res.values()):
             state.set_status('success')
             desc = 'Test successful'
-            utils.github_create_status(state.repo, state.head_sha, 'success', url, desc, context='homu')
+            utils.github_create_status(state.get_repo(), state.head_sha, 'success', url, desc, context='homu')
 
             urls = ', '.join('[{}]({})'.format(builder, x['url']) for builder, x in sorted(state.build_res.items()))
             state.add_comment(':sunny: {} - {}'.format(desc, urls))
@@ -311,14 +344,14 @@ def report_build_res(succ, url, builder, repo_label, state, logger):
             if state.approved_by and not state.try_:
                 try:
                     utils.github_set_ref(
-                        state.repo,
+                        state.get_repo(),
                         'heads/' + g.repo_cfgs[repo_label].get('branch', {}).get('master', 'master'),
                         state.merge_sha,
                     )
                 except github3.models.GitHubError as e:
                     state.set_status('error')
                     desc = 'Test was successful, but fast-forwarding failed: {}'.format(e)
-                    utils.github_create_status(state.repo, state.head_sha, 'error', url, desc, context='homu')
+                    utils.github_create_status(state.get_repo(), state.head_sha, 'error', url, desc, context='homu')
 
                     state.add_comment(':eyes: ' + desc)
 
@@ -326,7 +359,7 @@ def report_build_res(succ, url, builder, repo_label, state, logger):
         if state.status == 'pending':
             state.set_status('failure')
             desc = 'Test failed'
-            utils.github_create_status(state.repo, state.head_sha, 'failure', url, desc, context='homu')
+            utils.github_create_status(state.get_repo(), state.head_sha, 'failure', url, desc, context='homu')
 
             state.add_comment(':broken_heart: {} - [{}]({})'.format(desc, builder, url))
 
@@ -401,7 +434,7 @@ def buildbot():
 
                                 desc = ':snowman: The build was interrupted to prioritize another pull request.'
                                 state.add_comment(desc)
-                                utils.github_create_status(state.repo, state.head_sha, 'error', url, desc, context='homu')
+                                utils.github_create_status(state.get_repo(), state.head_sha, 'error', url, desc, context='homu')
 
                                 g.queue_handler()
 
@@ -463,7 +496,7 @@ def travis():
 
     token = g.repo_cfgs[repo_label]['travis']['token']
     auth_header = request.headers['Authorization']
-    code = hashlib.sha256(('{}/{}{}'.format(state.repo.owner.login, state.repo.name, token)).encode('utf-8')).hexdigest()
+    code = hashlib.sha256(('{}/{}{}'.format(state.owner, state.name, token)).encode('utf-8')).hexdigest()
     if auth_header != code:
         # this isn't necessarily an error, e.g. maybe someone is
         # fabricating travis notifications to try to trick Homu, but,
@@ -480,7 +513,15 @@ def travis():
 
     return 'OK'
 
-def start(cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots, my_username, db, repo_labels, mergeable_que):
+def synch(user_gh, state, repo_label, repo_cfg, repo):
+    if not repo.is_collaborator(user_gh.user().login):
+        abort(400, 'You are not a collaborator')
+
+    Thread(target=synchronize, args=[repo_label, repo_cfg, g.logger, g.gh, g.states, g.repos, g.db, g.mergeable_que, g.my_username, g.repo_labels]).start()
+
+    return 'Synchronizing {}...'.format(repo_label)
+
+def start(cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots, my_username, db, repo_labels, mergeable_que, gh):
     env = jinja2.Environment(
         loader = jinja2.FileSystemLoader(pkg_resources.resource_filename(__name__, 'html')),
         autoescape = True,
@@ -501,5 +542,6 @@ def start(cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots, 
     g.db = db
     g.repo_labels = repo_labels
     g.mergeable_que = mergeable_que
+    g.gh = gh
 
     run(host='', port=cfg['web']['port'], server='waitress')

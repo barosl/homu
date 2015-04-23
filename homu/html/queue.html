@@ -34,6 +34,7 @@
 
         <p>
             <button type="button" id="rollup">Create a rollup</button>
+            <button type="button" id="synch">Synchronize</button>
         </p>
 
         <p>
@@ -97,8 +98,21 @@
                     '?client_id={{oauth_client_id}}' +
                     '&scope=public_repo' +
                     '&state=' + encodeURIComponent(JSON.stringify({
+                        cmd: 'rollup',
                         repo_label: '{{repo_label}}',
                         nums: nums,
+                    }));
+            };
+
+            document.getElementById('synch').onclick = function(ev) {
+                if (!confirm('Retrieve all pull requests?')) return;
+
+                location = 'https://github.com/login/oauth/authorize' +
+                    '?client_id={{oauth_client_id}}' +
+                    '&scope=public_repo' +
+                    '&state=' + encodeURIComponent(JSON.stringify({
+                        cmd: 'synch',
+                        repo_label: '{{repo_label}}',
                     }));
             };
 
