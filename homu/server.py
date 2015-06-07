@@ -323,6 +323,26 @@ def github():
 
                 g.queue_handler()
 
+    elif event_type == 'status':
+        try: state, repo_label = find_state(info['sha'])
+        except ValueError:
+            return 'OK'
+
+        if 'status' not in state.build_res:
+            return 'OK'
+
+        if info['context'] != repo_cfg['status']['context']:
+            return 'OK'
+
+        if info['state'] == 'pending':
+            return 'OK'
+
+        for row in info['branches']:
+            if row['name'] == state.base_ref:
+                return 'OK'
+
+        report_build_res(info['state'] == 'success', info['target_url'], 'status', repo_label, state, logger)
+
     return 'OK'
 
 def report_build_res(succ, url, builder, repo_label, state, logger):

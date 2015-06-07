@@ -341,6 +341,9 @@ def start_build(state, repo_cfgs, buildbot_slots, logger, db):
     elif 'travis' in repo_cfg:
         branch = repo_cfg.get('branch', {}).get('auto', 'auto')
         builders = ['travis']
+    elif 'status' in repo_cfg:
+        branch = repo_cfg.get('branch', {}).get('auto', 'auto')
+        builders = ['status']
     else:
         raise RuntimeError('Invalid configuration')
 
@@ -644,8 +647,12 @@ def main():
             if merge_sha:
                 if 'buildbot' in repo_cfg:
                     builders = repo_cfg['buildbot']['builders']
-                else:
+                elif 'travis' in repo_cfg:
                     builders = ['travis']
+                elif 'status' in repo_cfg:
+                    builders = ['status']
+                else:
+                    raise RuntimeError('Invalid configuration')
 
                 state.init_build_res(builders, use_db=False)
                 state.merge_sha = merge_sha

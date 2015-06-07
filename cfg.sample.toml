@@ -56,3 +56,9 @@ secret = ""
 #
 ## found under <https://travis-ci.org/profile/info>.
 #token = ""
+
+## Use the Status API
+#[repo.NAME.status]
+#
+## String label set by status updates
+#context = ""
