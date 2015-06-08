@@ -500,7 +500,11 @@ def synchronize(repo_label, repo_cfg, logger, gh, states, repos, db, mergeable_q
 
     repo = gh.repository(repo_cfg['owner'], repo_cfg['name'])
 
-    repo_states = {}
+    db_query(db, 'DELETE FROM pull WHERE repo = ?', [repo_label])
+    db_query(db, 'DELETE FROM build_res WHERE repo = ?', [repo_label])
+    db_query(db, 'DELETE FROM mergeable WHERE repo = ?', [repo_label])
+
+    states[repo_label] = {}
     repos[repo_label] = repo
 
     for pull in repo.iter_pulls(state='open'):
@@ -547,9 +551,7 @@ def synchronize(repo_label, repo_cfg, logger, gh, states, repos, db, mergeable_q
 
         state.save()
 
-        repo_states[pull.number] = state
-
-    states[repo_label] = repo_states
+        states[repo_label][pull.number] = state
 
     logger.info('Done synchronizing {}!'.format(repo_label))
 
