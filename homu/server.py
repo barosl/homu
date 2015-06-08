@@ -541,6 +541,52 @@ def synch(user_gh, state, repo_label, repo_cfg, repo):
 
     return 'Synchronizing {}...'.format(repo_label)
 
+@post('/admin')
+def admin():
+    if request.json['secret'] != g.cfg['web']['secret']:
+        return 'Authentication failure'
+
+    if request.json['cmd'] == 'repo_new':
+        repo_label = request.json['repo_label']
+        repo_cfg = request.json['repo_cfg']
+
+        g.states[repo_label] = {}
+        g.repos[repo_label] = None
+        g.repo_cfgs[repo_label] = repo_cfg
+        g.repo_labels[repo_cfg['owner'], repo_cfg['name']] = repo_label
+
+        Thread(target=synchronize, args=[repo_label, repo_cfg, g.logger, g.gh, g.states, g.repos, g.db, g.mergeable_que, g.my_username, g.repo_labels]).start()
+
+        return 'OK'
+
+    elif request.json['cmd'] == 'repo_del':
+        repo_label = request.json['repo_label']
+        repo_cfg = g.repo_cfgs[repo_label]
+
+        db_query(g.db, 'DELETE FROM pull WHERE repo = ?', [repo_label])
+        db_query(g.db, 'DELETE FROM build_res WHERE repo = ?', [repo_label])
+        db_query(g.db, 'DELETE FROM mergeable WHERE repo = ?', [repo_label])
+
+        del g.states[repo_label]
+        del g.repos[repo_label]
+        del g.repo_cfgs[repo_label]
+        del g.repo_labels[repo_cfg['owner'], repo_cfg['name']]
+
+        return 'OK'
+
+    elif request.json['cmd'] == 'repo_edit':
+        repo_label = request.json['repo_label']
+        repo_cfg = request.json['repo_cfg']
+
+        assert repo_cfg['owner'] == g.repo_cfgs[repo_label]['owner']
+        assert repo_cfg['name'] == g.repo_cfgs[repo_label]['name']
+
+        g.repo_cfgs[repo_label] = repo_cfg
+
+        return 'OK'
+
+    return 'Unrecognized command'
+
 def start(cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots, my_username, db, repo_labels, mergeable_que, gh):
     env = jinja2.Environment(
         loader = jinja2.FileSystemLoader(pkg_resources.resource_filename(__name__, 'html')),
