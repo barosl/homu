@@ -31,7 +31,6 @@ reviewers = ["barosl", "graydon"]
 #master = "master"
 #auto = "auto"
 #try = "try"
-#tmp = "tmp"
 #rollup = "rollup"
 
 [repo.NAME.github]

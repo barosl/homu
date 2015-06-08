@@ -293,11 +293,11 @@ def parse_commands(body, username, repo_cfg, state, my_username, db, *, realtime
 
     return state_changed
 
-def create_merge(state, repo_cfg):
+def create_merge(state, repo_cfg, branch):
     master_sha = state.get_repo().ref('heads/' + repo_cfg.get('branch', {}).get('master', 'master')).object.sha
     utils.github_set_ref(
         state.get_repo(),
-        'heads/' + repo_cfg.get('branch', {}).get('tmp', 'tmp'),
+        'heads/' + branch,
         master_sha,
         force=True,
     )
@@ -308,7 +308,7 @@ def create_merge(state, repo_cfg):
         '<try>' if state.try_ else state.approved_by,
         state.body,
     )
-    try: merge_commit = state.get_repo().merge(repo_cfg.get('branch', {}).get('tmp', 'tmp'), state.head_sha, merge_msg)
+    try: merge_commit = state.get_repo().merge(branch, state.head_sha, merge_msg)
     except github3.models.GitHubError as e:
         if e.code != 409: raise
 
@@ -330,10 +330,6 @@ def start_build(state, repo_cfgs, buildbot_slots, logger, db):
 
     repo_cfg = repo_cfgs[state.repo_label]
 
-    merge_commit = create_merge(state, repo_cfg)
-    if not merge_commit:
-        return False
-
     if 'buildbot' in repo_cfg:
         branch = 'try' if state.try_ else 'auto'
         branch = repo_cfg.get('branch', {}).get(branch, branch)
@@ -347,7 +343,9 @@ def start_build(state, repo_cfgs, buildbot_slots, logger, db):
     else:
         raise RuntimeError('Invalid configuration')
 
-    utils.github_set_ref(state.get_repo(), 'heads/' + branch, merge_commit.sha, force=True)
+    merge_commit = create_merge(state, repo_cfg, branch)
+    if not merge_commit:
+        return False
 
     state.init_build_res(builders)
     state.merge_sha = merge_commit.sha
