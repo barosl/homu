@@ -96,7 +96,7 @@
 
                 location = 'https://github.com/login/oauth/authorize' +
                     '?client_id={{oauth_client_id}}' +
-                    '&scope=public_repo' +
+                    '&scope=public_repo,admin:repo_hook' +
                     '&state=' + encodeURIComponent(JSON.stringify({
                         cmd: 'rollup',
                         repo_label: '{{repo_label}}',
@@ -109,7 +109,7 @@
 
                 location = 'https://github.com/login/oauth/authorize' +
                     '?client_id={{oauth_client_id}}' +
-                    '&scope=public_repo' +
+                    '&scope=public_repo,admin:repo_hook' +
                     '&state=' + encodeURIComponent(JSON.stringify({
                         cmd: 'synch',
                         repo_label: '{{repo_label}}',
