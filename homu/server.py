@@ -38,7 +38,7 @@ def get_repo(repo_label, repo_cfg):
 def index():
     return g.tpls['index'].render(repos=sorted(g.repos))
 
-@get('/queue/<repo_label>')
+@get('/queue/<repo_label:path>')
 def queue(repo_label):
     logger = g.logger.getChild('queue')
 
