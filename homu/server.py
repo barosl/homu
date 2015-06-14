@@ -610,4 +610,4 @@ def start(cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots, 
     g.mergeable_que = mergeable_que
     g.gh = gh
 
-    run(host='', port=cfg['web']['port'], server='waitress')
+    run(host=cfg['web'].get('host', ''), port=cfg['web']['port'], server='waitress')
