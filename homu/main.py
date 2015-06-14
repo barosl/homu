@@ -571,8 +571,12 @@ def main():
     logger.setLevel(logging.DEBUG if args.verbose else logging.INFO)
     logger.addHandler(logging.StreamHandler())
 
-    with open('cfg.toml') as fp:
-        cfg = toml.loads(fp.read())
+    try:
+        with open('cfg.toml') as fp:
+            cfg = toml.loads(fp.read())
+    except FileNotFoundError:
+        with open('cfg.json') as fp:
+            cfg = json.loads(fp.read())
 
     gh = github3.login(token=cfg['github']['access_token'])
 
