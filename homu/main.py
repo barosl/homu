@@ -195,6 +195,12 @@ class PullReqState:
             self.rollup,
         ])
 
+    def refresh(self):
+        issue = self.get_repo().issue(self.num)
+
+        self.title = issue.title
+        self.body = issue.body
+
 def sha_cmp(short, full):
     return len(short) >= 4 and short == full[:len(short)]
 
@@ -301,6 +307,8 @@ def create_merge(state, repo_cfg, branch):
         master_sha,
         force=True,
     )
+
+    state.refresh()
 
     merge_msg = 'Auto merge of #{} - {}, r={}\n\n{}\n\n{}'.format(
         state.num,
