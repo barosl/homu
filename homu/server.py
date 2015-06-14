@@ -140,10 +140,11 @@ def rollup(user_gh, state, repo_label, repo_cfg, repo):
     failures = []
 
     for state in rollup_states:
-        merge_msg = 'Rollup merge of #{} - {}, r={}\n\n{}'.format(
+        merge_msg = 'Rollup merge of #{} - {}, r={}\n\n{}\n\n{}'.format(
             state.num,
             state.head_ref,
             state.approved_by,
+            state.title,
             state.body,
         )
 
