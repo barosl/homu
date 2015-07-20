@@ -28,7 +28,6 @@ reviewers = ["barosl", "graydon"]
 ## branch names (these settings here are the defaults)
 #[repo.NAME.branch]
 #
-#master = "master"
 #auto = "auto"
 #try = "try"
 #rollup = "rollup"

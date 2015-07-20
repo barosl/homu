@@ -128,11 +128,13 @@ def rollup(user_gh, state, repo_label, repo_cfg, repo):
     if not rollup_states:
         return 'No pull requests are marked as rollup'
 
-    master_sha = repo.ref('heads/' + repo_cfg.get('branch', {}).get('master', 'master')).object.sha
+    base_ref = rollup_states[0].base_ref
+
+    base_sha = repo.ref('heads/' + base_ref).object.sha
     utils.github_set_ref(
         user_repo,
         'heads/' + repo_cfg.get('branch', {}).get('rollup', 'rollup'),
-        master_sha,
+        base_sha,
         force=True,
     )
 
@@ -140,6 +142,10 @@ def rollup(user_gh, state, repo_label, repo_cfg, repo):
     failures = []
 
     for state in rollup_states:
+        if base_ref != state.base_ref:
+            failures.append(state.num)
+            continue
+
         merge_msg = 'Rollup merge of #{} - {}, r={}\n\n{}\n\n{}'.format(
             state.num,
             state.head_ref,
@@ -165,7 +171,7 @@ def rollup(user_gh, state, repo_label, repo_cfg, repo):
     try:
         pull = base_repo.create_pull(
             title,
-            repo_cfg.get('branch', {}).get('master', 'master'),
+            state.base_ref,
             user_repo.owner.login + ':' + repo_cfg.get('branch', {}).get('rollup', 'rollup'),
             body,
         )
@@ -366,7 +372,7 @@ def report_build_res(succ, url, builder, repo_label, state, logger):
                 try:
                     utils.github_set_ref(
                         state.get_repo(),
-                        'heads/' + g.repo_cfgs[repo_label].get('branch', {}).get('master', 'master'),
+                        'heads/' + state.base_ref,
                         state.merge_sha,
                     )
                 except github3.models.GitHubError as e:

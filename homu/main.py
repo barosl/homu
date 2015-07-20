@@ -300,11 +300,11 @@ def parse_commands(body, username, repo_cfg, state, my_username, db, *, realtime
     return state_changed
 
 def create_merge(state, repo_cfg, branch):
-    master_sha = state.get_repo().ref('heads/' + repo_cfg.get('branch', {}).get('master', 'master')).object.sha
+    base_sha = state.get_repo().ref('heads/' + state.base_ref).object.sha
     utils.github_set_ref(
         state.get_repo(),
         'heads/' + branch,
-        master_sha,
+        base_sha,
         force=True,
     )
 
@@ -397,10 +397,10 @@ def start_rebuild(state, repo_cfgs):
     if not builders or not succ_builders:
         return False
 
-    master_sha = state.get_repo().ref('heads/' + repo_cfg.get('branch', {}).get('master', 'master')).object.sha
+    base_sha = state.get_repo().ref('heads/' + state.base_ref).object.sha
     parent_shas = [x['sha'] for x in state.get_repo().commit(state.merge_sha).parents]
 
-    if master_sha not in parent_shas:
+    if base_sha not in parent_shas:
         return False
 
     utils.github_set_ref(state.get_repo(), 'tags/homu-tmp', state.merge_sha, force=True)
