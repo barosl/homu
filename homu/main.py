@@ -225,6 +225,10 @@ def parse_commands(body, username, repo_cfg, state, my_username, db, *, realtime
 
             approver = word[len('r='):] if word.startswith('r=') else username
 
+            # Ignore "r=me"
+            if approver == 'me':
+                continue
+
             # Sometimes, GitHub sends the head SHA of a PR as 0000000 through the webhook. This is
             # called a "null commit", and seems to happen when GitHub internally encounters a race
             # condition. Last time, it happened when squashing commits in a PR. In this case, we
