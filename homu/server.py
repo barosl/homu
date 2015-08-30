@@ -256,7 +256,7 @@ def github():
 
             if action == 'reopened':
                 # FIXME: Review comments are ignored here
-                for comment in get_repo(repo_label, repo_cfg).issue(pull_num).iter_comments():
+                for comment in state.get_repo().issue(pull_num).iter_comments():
                     found = parse_commands(
                         comment.body,
                         comment.user.login,
@@ -265,6 +265,14 @@ def github():
                         g.my_username,
                         g.db,
                     ) or found
+
+                status = ''
+                for info in utils.github_iter_statuses(state.get_repo(), state.head_sha):
+                    if info.context == 'homu':
+                        status = info.state
+                        break
+
+                state.set_status(status)
 
             state.save()
 
