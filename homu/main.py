@@ -13,6 +13,8 @@ import requests
 from contextlib import contextmanager
 from itertools import chain
 from queue import Queue
+import os
+import subprocess
 
 STATUS_TO_PRIORITY = {
     'success': 0,
@@ -315,14 +317,8 @@ def parse_commands(body, username, repo_cfg, state, my_username, db, *, realtime
 
     return state_changed
 
-def create_merge(state, repo_cfg, branch):
+def create_merge(state, repo_cfg, branch, git_cfg):
     base_sha = state.get_repo().ref('heads/' + state.base_ref).object.sha
-    utils.github_set_ref(
-        state.get_repo(),
-        'heads/' + branch,
-        base_sha,
-        force=True,
-    )
 
     state.refresh()
 
@@ -333,21 +329,64 @@ def create_merge(state, repo_cfg, branch):
         state.title,
         state.body,
     )
-    try: merge_commit = state.get_repo().merge(branch, state.head_sha, merge_msg)
-    except github3.models.GitHubError as e:
-        if e.code != 409: raise
 
-        state.set_status('error')
-        desc = 'Merge conflict'
-        utils.github_create_status(state.get_repo(), state.head_sha, 'error', '', desc, context='homu')
+    desc = 'Merge conflict'
 
-        state.add_comment(':lock: ' + desc)
+    if repo_cfg.get('rebase', False):
+        pull = state.get_repo().pull_request(state.num)
 
-        return None
+        fpath = 'cache/{}/{}'.format(repo_cfg['owner'], repo_cfg['name'])
+        url = 'git@github.com:{}/{}.git'.format(repo_cfg['owner'], repo_cfg['name'])
+        head_repo_url = 'https://github.com/{}/{}.git'.format(*pull.head.repo)
+        head_branch = state.head_ref.split(':')[1]
 
-    return merge_commit
+        if os.path.exists(fpath):
+            utils.logged_call(['git', '-C', fpath, 'fetch', '--no-tags', 'origin', state.base_ref])
+        else:
+            utils.logged_call(['git', 'clone', url, fpath])
 
-def start_build(state, repo_cfgs, buildbot_slots, logger, db):
+        utils.silent_call(['git', '-C', fpath, 'remote', 'remove', 'head_repo'])
+        utils.logged_call(['git', '-C', fpath, 'remote', 'add', '-f', '--no-tags'] + (['-t', head_branch] if head_branch else []) + ['head_repo', head_repo_url])
+
+        utils.silent_call(['git', '-C', fpath, 'rebase', '--abort'])
+        utils.logged_call(['git', '-C', fpath, 'checkout', '-B', branch, state.head_sha])
+        try:
+            if repo_cfg.get('autosquash', True):
+                utils.logged_call(['git', '-C', fpath, 'rebase', '-i', '--autosquash', base_sha])
+            else:
+                utils.logged_call(['git', '-C', fpath, 'rebase', base_sha])
+        except subprocess.CalledProcessError:
+            if repo_cfg.get('autosquash', True):
+                utils.silent_call(['git', '-C', fpath, 'rebase', '--abort'])
+                if utils.silent_call(['git', '-C', fpath, 'rebase', base_sha]) == 0:
+                    desc = 'Auto-squashing failed'
+        else:
+            utils.logged_call(['git', '-C', fpath, '-c', 'user.name=' + git_cfg['name'], '-c', 'user.email=' + git_cfg['email'], 'commit', '-m', merge_msg, '--allow-empty'])
+            utils.logged_call(['git', '-C', fpath, 'push', '-f', 'origin', branch])
+
+            return subprocess.check_output(['git', '-C', fpath, 'rev-parse', 'HEAD']).decode('ascii').strip()
+    else:
+        utils.github_set_ref(
+            state.get_repo(),
+            'heads/' + branch,
+            base_sha,
+            force=True,
+        )
+
+        try: merge_commit = state.get_repo().merge(branch, state.head_sha, merge_msg)
+        except github3.models.GitHubError as e:
+            if e.code != 409: raise
+        else:
+            return merge_commit.sha if merge_commit else None
+
+    state.set_status('error')
+    utils.github_create_status(state.get_repo(), state.head_sha, 'error', '', desc, context='homu')
+
+    state.add_comment(':lock: ' + desc)
+
+    return None
+
+def start_build(state, repo_cfgs, buildbot_slots, logger, db, git_cfg):
     if buildbot_slots[0]:
         return True
 
@@ -368,12 +407,12 @@ def start_build(state, repo_cfgs, buildbot_slots, logger, db):
     else:
         raise RuntimeError('Invalid configuration')
 
-    merge_commit = create_merge(state, repo_cfg, branch)
-    if not merge_commit:
+    merge_sha = create_merge(state, repo_cfg, branch, git_cfg)
+    if not merge_sha:
         return False
 
     state.init_build_res(builders)
-    state.merge_sha = merge_commit.sha
+    state.merge_sha = merge_sha
 
     state.save()
 
@@ -462,7 +501,7 @@ def start_build_or_rebuild(state, repo_cfgs, *args):
 
     return start_build(state, repo_cfgs, *args)
 
-def process_queue(states, repos, repo_cfgs, logger, buildbot_slots, db):
+def process_queue(states, repos, repo_cfgs, logger, buildbot_slots, db, git_cfg):
     for repo_label, repo in repos.items():
         repo_states = sorted(states[repo_label].values())
 
@@ -471,7 +510,7 @@ def process_queue(states, repos, repo_cfgs, logger, buildbot_slots, db):
                 break
 
             elif state.status == '' and state.approved_by:
-                if start_build_or_rebuild(state, repo_cfgs, buildbot_slots, logger, db):
+                if start_build_or_rebuild(state, repo_cfgs, buildbot_slots, logger, db, git_cfg):
                     return
 
             elif state.status == 'success' and state.try_ and state.approved_by:
@@ -479,12 +518,12 @@ def process_queue(states, repos, repo_cfgs, logger, buildbot_slots, db):
 
                 state.save()
 
-                if start_build(state, repo_cfgs, buildbot_slots, logger, db):
+                if start_build(state, repo_cfgs, buildbot_slots, logger, db, git_cfg):
                     return
 
         for state in repo_states:
             if state.status == '' and state.try_:
-                if start_build(state, repo_cfgs, buildbot_slots, logger, db):
+                if start_build(state, repo_cfgs, buildbot_slots, logger, db, git_cfg):
                     return
 
 def fetch_mergeability(mergeable_que):
@@ -604,14 +643,19 @@ def main():
             cfg = json.loads(fp.read())
 
     gh = github3.login(token=cfg['github']['access_token'])
+    user = gh.user()
+    try: user_email = [x for x in gh.iter_emails() if x['primary']][0]['email']
+    except IndexError:
+        raise RuntimeError('Primary email not set, or "user" scope not granted')
 
     states = {}
     repos = {}
     repo_cfgs = {}
     buildbot_slots = ['']
-    my_username = gh.user().login
+    my_username = user.login
     repo_labels = {}
     mergeable_que = Queue()
+    git_cfg = {'name': user.name if user.name else user.login, 'email': user_email}
 
     db_conn = sqlite3.connect('main.db', check_same_thread=False, isolation_level=None)
     db = db_conn.cursor()
@@ -723,7 +767,10 @@ def main():
     queue_handler_lock = Lock()
     def queue_handler():
         with queue_handler_lock:
-            return process_queue(states, repos, repo_cfgs, logger, buildbot_slots, db)
+            return process_queue(states, repos, repo_cfgs, logger, buildbot_slots, db, git_cfg)
+
+    os.environ['GIT_SSH'] = os.path.join(os.path.dirname(__file__), 'git-helper.py')
+    os.environ['GIT_EDITOR'] = 'cat'
 
     from . import server
     Thread(target=server.start, args=[cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots, my_username, db, repo_labels, mergeable_que, gh]).start()

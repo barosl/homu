@@ -10,6 +10,10 @@ access_token = ""
 app_client_id = ""
 app_client_secret = ""
 
+# SSH private key. Needed only when the "rebase" feature is used
+#ssh_key = """
+#"""
+
 [web]
 
 # The port homu listens on
@@ -24,6 +28,12 @@ name = ""
 
 # who has r+ rights?
 reviewers = ["barosl", "graydon"]
+
+# Rebase instead of merge, using the local git command
+#rebase = false
+
+# Auto-squash commits while rebasing
+#autosquash = true
 
 ## branch names (these settings here are the defaults)
 #[repo.NAME.branch]

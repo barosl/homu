@@ -282,6 +282,15 @@ def github():
                 g.queue_handler()
 
         elif action == 'closed':
+            state = g.states[repo_label][pull_num]
+            if getattr(state, 'rebased', False):
+                utils.github_set_ref(
+                    state.get_repo(),
+                    'heads/' + state.base_ref,
+                    state.merge_sha,
+                    force=True,
+                )
+
             del g.states[repo_label][pull_num]
 
             db_query(g.db, 'DELETE FROM pull WHERE repo = ? AND num = ?', [repo_label, pull_num])
@@ -356,11 +365,11 @@ def github():
             if row['name'] == state.base_ref:
                 return 'OK'
 
-        report_build_res(info['state'] == 'success', info['target_url'], 'status', repo_label, state, logger)
+        report_build_res(info['state'] == 'success', info['target_url'], 'status', repo_label, state, logger, repo_cfg)
 
     return 'OK'
 
-def report_build_res(succ, url, builder, repo_label, state, logger):
+def report_build_res(succ, url, builder, repo_label, state, logger, repo_cfg):
     lazy_debug(logger,
                lambda: 'build result {}: builder = {}, succ = {}, current build_res = {}'
                             .format(state, builder, succ, state.build_res_summary()))
@@ -383,6 +392,14 @@ def report_build_res(succ, url, builder, repo_label, state, logger):
                         'heads/' + state.base_ref,
                         state.merge_sha,
                     )
+
+                    if repo_cfg.get('rebase'):
+                        msg = '!!! Temporary commit !!!\n\nThis commit is artifically made up to mark PR {} as merged.\n\n[ci skip]'.format(state.num)
+
+                        # `merge()` will return `None` if the `head_sha` commit is already part of the `base_ref` branch, which means rebasing didn't have to modify the original commit
+                        if state.get_repo().merge(state.base_ref, state.head_sha, msg):
+                            state.rebased = True
+
                 except github3.models.GitHubError as e:
                     state.set_status('error')
                     desc = 'Test was successful, but fast-forwarding failed: {}'.format(e)
@@ -478,7 +495,7 @@ def buildbot():
                 else:
                     logger.error('Corrupt payload from Buildbot')
 
-            report_build_res(build_succ, url, info['builderName'], repo_label, state, logger)
+            report_build_res(build_succ, url, info['builderName'], repo_label, state, logger, repo_cfg)
 
         elif row['event'] == 'buildStarted':
             info = row['payload']['build']

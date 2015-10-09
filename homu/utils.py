@@ -1,6 +1,8 @@
 import json
 import github3
 import logging
+import subprocess
+import sys
 
 def github_set_ref(repo, ref, sha, *, force=False, auto_create=True):
     url = repo._build_url('git', 'refs', ref, base_url=repo._api)
@@ -46,3 +48,12 @@ def remove_url_keys_from_json(json):
 def lazy_debug(logger, f):
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug(f())
+
+def logged_call(args):
+    try: subprocess.check_output(args, stderr=subprocess.STDOUT)
+    except subprocess.CalledProcessError as e:
+        print('* Failed to execute command: {}\n* Output:\n====\n{}\n===='.format(args, e.output.decode('utf-8', 'replace')))
+        raise
+
+def silent_call(args):
+    return subprocess.call(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
