@@ -210,8 +210,12 @@ def sha_or_blank(sha):
     return sha if re.match(r'^[0-9a-f]+$', sha) else ''
 
 def parse_commands(body, username, repo_cfg, state, my_username, db, *, realtime=False, sha=''):
+    try_only = False
     if username not in repo_cfg['reviewers'] and username != my_username:
-        return False
+        if username in repo_cfg.get('try_users', []):
+            try_only = True
+        else:
+            return False
 
     state_changed = False
 
@@ -220,6 +224,10 @@ def parse_commands(body, username, repo_cfg, state, my_username, db, *, realtime
         found = True
 
         if word == 'r+' or word.startswith('r='):
+            if try_only:
+                state.add_comment(':key: Insufficient privileges')
+                continue
+
             if not sha and i+1 < len(words):
                 cur_sha = sha_or_blank(words[i+1])
             else:
@@ -255,6 +263,10 @@ def parse_commands(body, username, repo_cfg, state, my_username, db, *, realtime
                     state.add_comment(':pushpin: Commit {:.7} has been approved by `{}`\n\n<!-- @{} r={} {} -->'.format(state.head_sha, approver, my_username, approver, state.head_sha))
 
         elif word == 'r-':
+            if try_only:
+                state.add_comment(':key: Insufficient privileges')
+                continue
+
             state.approved_by = ''
 
             state.save()
