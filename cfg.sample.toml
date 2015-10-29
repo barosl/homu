@@ -29,6 +29,9 @@ name = ""
 # who has r+ rights?
 reviewers = ["barosl", "graydon"]
 
+# who has 'try' rights? (try, retry, force, clean, prioritization)
+try_users = []
+
 # Rebase instead of merge, using the local git command
 #rebase = false
 
