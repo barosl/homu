@@ -15,6 +15,7 @@ from itertools import chain
 from queue import Queue
 import os
 import subprocess
+from .git_helper import SSH_KEY_FILE
 
 STATUS_TO_PRIORITY = {
     'success': 0,
@@ -352,6 +353,11 @@ def create_merge(state, repo_cfg, branch, git_cfg):
         head_repo_url = 'https://github.com/{}/{}.git'.format(*pull.head.repo)
         head_branch = state.head_ref.split(':')[1]
 
+        os.makedirs(os.path.dirname(SSH_KEY_FILE), exist_ok=True)
+        with open(SSH_KEY_FILE, 'w') as fp:
+            fp.write(git_cfg['ssh_key'])
+        os.chmod(SSH_KEY_FILE, 0o600)
+
         if os.path.exists(fpath):
             utils.logged_call(['git', '-C', fpath, 'fetch', '--no-tags', 'origin', state.base_ref])
         else:
@@ -667,7 +673,7 @@ def main():
     my_username = user.login
     repo_labels = {}
     mergeable_que = Queue()
-    git_cfg = {'name': user.name if user.name else user.login, 'email': user_email}
+    git_cfg = {'name': user.name if user.name else user.login, 'email': user_email, 'ssh_key': cfg['github']['ssh_key']}
 
     db_conn = sqlite3.connect('main.db', check_same_thread=False, isolation_level=None)
     db = db_conn.cursor()
@@ -781,7 +787,7 @@ def main():
         with queue_handler_lock:
             return process_queue(states, repos, repo_cfgs, logger, buildbot_slots, db, git_cfg)
 
-    os.environ['GIT_SSH'] = os.path.join(os.path.dirname(__file__), 'git-helper.py')
+    os.environ['GIT_SSH'] = os.path.join(os.path.dirname(__file__), 'git_helper.py')
     os.environ['GIT_EDITOR'] = 'cat'
 
     from . import server
