@@ -546,7 +546,8 @@ def travis():
         lazy_debug(logger, lambda: 'travis is not a monitored target for %s', state)
         return 'OK'
 
-    token = g.repo_cfgs[repo_label]['travis']['token']
+    repo_cfg = g.repo_cfgs[repo_label]
+    token = repo_cfg['travis']['token']
     auth_header = request.headers['Authorization']
     code = hashlib.sha256(('{}/{}{}'.format(state.owner, state.name, token)).encode('utf-8')).hexdigest()
     if auth_header != code:
@@ -561,7 +562,7 @@ def travis():
 
     succ = info['result'] == 0
 
-    report_build_res(succ, info['build_url'], 'travis', repo_label, state, logger)
+    report_build_res(succ, info['build_url'], 'travis', repo_label, state, logger, repo_cfg)
 
     return 'OK'
 
