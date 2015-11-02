@@ -384,12 +384,13 @@ def create_merge(state, repo_cfg, branch, git_cfg):
 
             return subprocess.check_output(['git', '-C', fpath, 'rev-parse', 'HEAD']).decode('ascii').strip()
     else:
-        utils.github_set_ref(
-            state.get_repo(),
-            'heads/' + branch,
-            base_sha,
-            force=True,
-        )
+        if branch != state.base_ref:
+            utils.github_set_ref(
+                state.get_repo(),
+                'heads/' + branch,
+                base_sha,
+                force=True,
+            )
 
         try: merge_commit = state.get_repo().merge(branch, state.head_sha, merge_msg)
         except github3.models.GitHubError as e:
@@ -424,6 +425,28 @@ def start_build(state, repo_cfgs, buildbot_slots, logger, db, git_cfg):
         builders = ['status']
     else:
         raise RuntimeError('Invalid configuration')
+
+    if state.approved_by and builders == ['status'] and repo_cfg['status']['context'] == 'continuous-integration/travis-ci/push':
+        for info in utils.github_iter_statuses(state.get_repo(), state.head_sha):
+            if info.context == 'continuous-integration/travis-ci/pr':
+                if info.state == 'success':
+                    mat = re.search('/builds/([0-9]+)$', info.target_url)
+                    if mat:
+                        url = 'https://api.travis-ci.org/{}/{}/builds/{}'.format(state.owner, state.name, mat.group(1))
+                        res = requests.get(url)
+                        travis_sha = json.loads(res.text)['commit']
+                        travis_commit = state.get_repo().commit(travis_sha)
+                        base_sha = state.get_repo().ref('heads/' + state.base_ref).object.sha
+                        if [travis_commit.parents[0]['sha'], travis_commit.parents[1]['sha']] == [base_sha, state.head_sha]:
+                            if create_merge(state, repo_cfg, state.base_ref, git_cfg):
+                                desc = 'Test exempted'
+                                url = info.target_url
+
+                                state.set_status('success')
+                                utils.github_create_status(state.get_repo(), state.head_sha, 'success', url, desc, context='homu')
+                                state.add_comment(':zap: {} - [{}]({})'.format(desc, 'status', url))
+                                return True
+                break
 
     merge_sha = create_merge(state, repo_cfg, branch, git_cfg)
     if not merge_sha:
