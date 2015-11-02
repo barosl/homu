@@ -365,11 +365,11 @@ def github():
             if row['name'] == state.base_ref:
                 return 'OK'
 
-        report_build_res(info['state'] == 'success', info['target_url'], 'status', repo_label, state, logger, repo_cfg)
+        report_build_res(info['state'] == 'success', info['target_url'], 'status', state, logger, repo_cfg)
 
     return 'OK'
 
-def report_build_res(succ, url, builder, repo_label, state, logger, repo_cfg):
+def report_build_res(succ, url, builder, state, logger, repo_cfg):
     lazy_debug(logger,
                lambda: 'build result {}: builder = {}, succ = {}, current build_res = {}'
                             .format(state, builder, succ, state.build_res_summary()))
@@ -495,7 +495,7 @@ def buildbot():
                 else:
                     logger.error('Corrupt payload from Buildbot')
 
-            report_build_res(build_succ, url, info['builderName'], repo_label, state, logger, repo_cfg)
+            report_build_res(build_succ, url, info['builderName'], state, logger, repo_cfg)
 
         elif row['event'] == 'buildStarted':
             info = row['payload']['build']
@@ -562,7 +562,7 @@ def travis():
 
     succ = info['result'] == 0
 
-    report_build_res(succ, info['build_url'], 'travis', repo_label, state, logger, repo_cfg)
+    report_build_res(succ, info['build_url'], 'travis', state, logger, repo_cfg)
 
     return 'OK'
 
