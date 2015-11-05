@@ -794,7 +794,6 @@ def main():
             state.body = body
             state.head_ref = head_ref
             state.base_ref = base_ref
-            state.set_mergeable(None)
             state.assignee = assignee
 
             state.approved_by = approved_by
