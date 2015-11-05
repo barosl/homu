@@ -538,7 +538,7 @@ def travis():
     lazy_debug(logger, lambda: 'state: {}, {}'.format(state, state.build_res_summary()))
 
     if 'travis' not in state.build_res:
-        lazy_debug(logger, lambda: 'travis is not a monitored target for %s', state)
+        lazy_debug(logger, lambda: 'travis is not a monitored target for {}'.format(state))
         return 'OK'
 
     repo_cfg = g.repo_cfgs[repo_label]
