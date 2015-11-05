@@ -204,6 +204,14 @@ class PullReqState:
         self.title = issue.title
         self.body = issue.body
 
+    def fake_merged(self, repo_cfg):
+        if repo_cfg.get('linear', False) or repo_cfg.get('autosquash', False):
+            msg = '!!! Temporary commit !!!\n\nThis commit is artifically made up to mark PR {} as merged.\n\nIf this commit remained in the history, you may reset HEAD to {}\n\n[ci skip]'.format(self.num, self.merge_sha)
+
+            # `merge()` will return `None` if the `head_sha` commit is already part of the `base_ref` branch, which means rebasing didn't have to modify the original commit
+            if self.get_repo().merge(self.base_ref, self.head_sha, msg):
+                self.rebased = True
+
 def sha_cmp(short, full):
     return len(short) >= 4 and short == full[:len(short)]
 
@@ -345,7 +353,7 @@ def create_merge(state, repo_cfg, branch, git_cfg):
 
     desc = 'Merge conflict'
 
-    if repo_cfg.get('rebase', False):
+    if git_cfg['local_git']:
         pull = state.get_repo().pull_request(state.num)
 
         fpath = 'cache/{}/{}'.format(repo_cfg['owner'], repo_cfg['name'])
@@ -367,23 +375,48 @@ def create_merge(state, repo_cfg, branch, git_cfg):
         utils.logged_call(['git', '-C', fpath, 'remote', 'add', '-f', '--no-tags'] + (['-t', head_branch] if head_branch else []) + ['head_repo', head_repo_url])
 
         utils.silent_call(['git', '-C', fpath, 'rebase', '--abort'])
-        utils.logged_call(['git', '-C', fpath, 'checkout', '-B', branch, state.head_sha])
-        try:
-            if repo_cfg.get('autosquash', True):
-                utils.logged_call(['git', '-C', fpath, 'rebase', '-i', '--autosquash', base_sha])
-            else:
-                utils.logged_call(['git', '-C', fpath, 'rebase', base_sha])
-        except subprocess.CalledProcessError:
-            if repo_cfg.get('autosquash', True):
-                utils.silent_call(['git', '-C', fpath, 'rebase', '--abort'])
-                if utils.silent_call(['git', '-C', fpath, 'rebase', base_sha]) == 0:
-                    desc = 'Auto-squashing failed'
-        else:
-            utils.logged_call(['git', '-C', fpath, '-c', 'user.name=' + git_cfg['name'], '-c', 'user.email=' + git_cfg['email'], 'commit', '-m', merge_msg, '--allow-empty'])
-            utils.logged_call(['git', '-C', fpath, 'push', '-f', 'origin', branch])
+        utils.silent_call(['git', '-C', fpath, 'merge', '--abort'])
 
-            return subprocess.check_output(['git', '-C', fpath, 'rev-parse', 'HEAD']).decode('ascii').strip()
+        if repo_cfg.get('linear', False):
+            utils.logged_call(['git', '-C', fpath, 'checkout', '-B', branch, state.head_sha])
+            try:
+                utils.logged_call(['git', '-C', fpath, '-c', 'user.name=' + git_cfg['name'], '-c', 'user.email=' + git_cfg['email'], 'rebase'] + (['-i', '--autosquash'] if repo_cfg.get('autosquash', False) else []) + [base_sha])
+            except subprocess.CalledProcessError:
+                if repo_cfg.get('autosquash', False):
+                    utils.silent_call(['git', '-C', fpath, 'rebase', '--abort'])
+                    if utils.silent_call(['git', '-C', fpath, 'rebase', base_sha]) == 0:
+                        desc = 'Auto-squashing failed'
+            else:
+                utils.logged_call(['git', '-C', fpath, '-c', 'user.name=' + git_cfg['name'], '-c', 'user.email=' + git_cfg['email'], 'commit', '-m', merge_msg, '--allow-empty'])
+                utils.logged_call(['git', '-C', fpath, 'push', '-f', 'origin', branch])
+
+                return subprocess.check_output(['git', '-C', fpath, 'rev-parse', 'HEAD']).decode('ascii').strip()
+        else:
+            utils.logged_call(['git', '-C', fpath, 'checkout', '-B', 'homu-tmp', state.head_sha])
+
+            ok = True
+            if repo_cfg.get('autosquash', False):
+                try:
+                    merge_base_sha = subprocess.check_output(['git', '-C', fpath, 'merge-base', base_sha, state.head_sha]).decode('ascii').strip()
+                    utils.logged_call(['git', '-C', fpath, '-c', 'user.name=' + git_cfg['name'], '-c', 'user.email=' + git_cfg['email'], 'rebase', '-i', '--autosquash', '--onto', merge_base_sha, base_sha])
+                except subprocess.CalledProcessError:
+                    desc = 'Auto-squashing failed'
+                    ok = False
+
+            if ok:
+                utils.logged_call(['git', '-C', fpath, 'checkout', '-B', branch, base_sha])
+                try:
+                    utils.logged_call(['git', '-C', fpath, '-c', 'user.name=' + git_cfg['name'], '-c', 'user.email=' + git_cfg['email'], 'merge', 'heads/homu-tmp', '-m', merge_msg])
+                except subprocess.CalledProcessError:
+                    pass
+                else:
+                    utils.logged_call(['git', '-C', fpath, 'push', '-f', 'origin', branch])
+
+                    return subprocess.check_output(['git', '-C', fpath, 'rev-parse', 'HEAD']).decode('ascii').strip()
     else:
+        if repo_cfg.get('linear', False) or repo_cfg.get('autosquash', False):
+            raise RuntimeError('local_git must be turned on to use this feature')
+
         if branch != state.base_ref:
             utils.github_set_ref(
                 state.get_repo(),
@@ -396,14 +429,14 @@ def create_merge(state, repo_cfg, branch, git_cfg):
         except github3.models.GitHubError as e:
             if e.code != 409: raise
         else:
-            return merge_commit.sha if merge_commit else None
+            return merge_commit.sha if merge_commit else ''
 
     state.set_status('error')
     utils.github_create_status(state.get_repo(), state.head_sha, 'error', '', desc, context='homu')
 
     state.add_comment(':lock: ' + desc)
 
-    return None
+    return ''
 
 def start_build(state, repo_cfgs, buildbot_slots, logger, db, git_cfg):
     if buildbot_slots[0]:
@@ -438,13 +471,19 @@ def start_build(state, repo_cfgs, buildbot_slots, logger, db, git_cfg):
                         travis_commit = state.get_repo().commit(travis_sha)
                         base_sha = state.get_repo().ref('heads/' + state.base_ref).object.sha
                         if [travis_commit.parents[0]['sha'], travis_commit.parents[1]['sha']] == [base_sha, state.head_sha]:
-                            if create_merge(state, repo_cfg, state.base_ref, git_cfg):
+                            merge_sha = create_merge(state, repo_cfg, state.base_ref, git_cfg)
+                            if merge_sha:
                                 desc = 'Test exempted'
                                 url = info.target_url
 
                                 state.set_status('success')
                                 utils.github_create_status(state.get_repo(), state.head_sha, 'success', url, desc, context='homu')
                                 state.add_comment(':zap: {} - [{}]({})'.format(desc, 'status', url))
+
+                                state.merge_sha = merge_sha
+                                state.save()
+
+                                state.fake_merged(repo_cfg)
                                 return True
                 break
 
@@ -696,7 +735,12 @@ def main():
     my_username = user.login
     repo_labels = {}
     mergeable_que = Queue()
-    git_cfg = {'name': user.name if user.name else user.login, 'email': user_email, 'ssh_key': cfg['github']['ssh_key']}
+    git_cfg = {
+        'name': user.name if user.name else user.login,
+        'email': user_email,
+        'ssh_key': cfg['git'].get('ssh_key', ''),
+        'local_git': cfg['git'].get('local_git', False),
+    }
 
     db_conn = sqlite3.connect('main.db', check_same_thread=False, isolation_level=None)
     db = db_conn.cursor()

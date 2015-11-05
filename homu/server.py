@@ -393,12 +393,7 @@ def report_build_res(succ, url, builder, state, logger, repo_cfg):
                         state.merge_sha,
                     )
 
-                    if repo_cfg.get('rebase'):
-                        msg = '!!! Temporary commit !!!\n\nThis commit is artifically made up to mark PR {} as merged.\n\n[ci skip]'.format(state.num)
-
-                        # `merge()` will return `None` if the `head_sha` commit is already part of the `base_ref` branch, which means rebasing didn't have to modify the original commit
-                        if state.get_repo().merge(state.base_ref, state.head_sha, msg):
-                            state.rebased = True
+                    state.fake_merged(repo_cfg)
 
                 except github3.models.GitHubError as e:
                     state.set_status('error')
