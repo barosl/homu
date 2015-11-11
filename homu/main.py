@@ -765,8 +765,8 @@ def main():
     git_cfg = {
         'name': user.name if user.name else user.login,
         'email': user_email,
-        'ssh_key': cfg['git'].get('ssh_key', ''),
-        'local_git': cfg['git'].get('local_git', False),
+        'ssh_key': cfg.get('git', {}).get('ssh_key', ''),
+        'local_git': cfg.get('git', {}).get('local_git', False),
     }
 
     db_conn = sqlite3.connect('main.db', check_same_thread=False, isolation_level=None)
