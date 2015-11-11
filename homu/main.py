@@ -56,6 +56,7 @@ class PullReqState:
     head_ref = ''
     base_ref = ''
     assignee = ''
+    delegate = ''
 
     def __init__(self, num, head_sha, status, db, repo_label, mergeable_que, gh, owner, name, repos):
         self.head_advanced('', use_db=False)
@@ -70,7 +71,6 @@ class PullReqState:
         self.owner = owner
         self.name = name
         self.repos = repos
-        self.delegate = ''
 
     def head_advanced(self, head_sha, *, use_db=True):
         self.head_sha = head_sha
@@ -224,8 +224,7 @@ def parse_commands(body, username, repo_cfg, state, my_username, db, *, realtime
     try_only = False
     if username not in repo_cfg['reviewers'] and username != my_username:
         if username == state.delegate:
-            # Allow users who have been delegated review powers
-            pass
+            pass # Allow users who have been delegated review powers
         elif username in repo_cfg.get('try_users', []):
             try_only = True
         else:
@@ -239,7 +238,7 @@ def parse_commands(body, username, repo_cfg, state, my_username, db, *, realtime
 
         if word == 'r+' or word.startswith('r='):
             if try_only:
-                state.add_comment(':key: Insufficient privileges')
+                if realtime: state.add_comment(':key: Insufficient privileges')
                 continue
 
             if not sha and i+1 < len(words):
@@ -278,7 +277,7 @@ def parse_commands(body, username, repo_cfg, state, my_username, db, *, realtime
 
         elif word == 'r-':
             if try_only:
-                state.add_comment(':key: Insufficient privileges')
+                if realtime: state.add_comment(':key: Insufficient privileges')
                 continue
 
             state.approved_by = ''
@@ -293,12 +292,13 @@ def parse_commands(body, username, repo_cfg, state, my_username, db, *, realtime
 
         elif word.startswith('delegate='):
             if try_only:
-                state.add_comment(':key: Insufficient privileges')
+                if realtime: state.add_comment(':key: Insufficient privileges')
                 continue
+
             state.delegate = word[len('delegate='):]
             state.save()
 
-            state.add_comment(':v: @{} can now approve this pull request'.format(state.delegate))
+            if realtime: state.add_comment(':v: @{} can now approve this pull request'.format(state.delegate))
 
         elif word == 'delegate-':
             state.delegate = ''
@@ -306,12 +306,13 @@ def parse_commands(body, username, repo_cfg, state, my_username, db, *, realtime
 
         elif word == 'delegate+':
             if try_only:
-                state.add_comment(':key: Insufficient privileges')
+                if realtime: state.add_comment(':key: Insufficient privileges')
                 continue
+
             state.delegate = state.get_repo().pull_request(state.num).user.login
             state.save()
 
-            state.add_comment(':v: @{} can now approve this pull request'.format(state.delegate))
+            if realtime: state.add_comment(':v: @{} can now approve this pull request'.format(state.delegate))
 
         elif word == 'retry' and realtime:
             state.set_status('')
