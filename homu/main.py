@@ -70,6 +70,7 @@ class PullReqState:
         self.owner = owner
         self.name = name
         self.repos = repos
+        self.delegate = ''
 
     def head_advanced(self, head_sha, *, use_db=True):
         self.head_sha = head_sha
@@ -181,7 +182,7 @@ class PullReqState:
         return repo
 
     def save(self):
-        db_query(self.db, 'INSERT OR REPLACE INTO pull (repo, num, status, merge_sha, title, body, head_sha, head_ref, base_ref, assignee, approved_by, priority, try_, rollup) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [
+        db_query(self.db, 'INSERT OR REPLACE INTO pull (repo, num, status, merge_sha, title, body, head_sha, head_ref, base_ref, assignee, approved_by, priority, try_, rollup, delegate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [
             self.repo_label,
             self.num,
             self.status,
@@ -196,6 +197,7 @@ class PullReqState:
             self.priority,
             self.try_,
             self.rollup,
+            self.delegate,
         ])
 
     def refresh(self):
@@ -221,7 +223,10 @@ def sha_or_blank(sha):
 def parse_commands(body, username, repo_cfg, state, my_username, db, *, realtime=False, sha=''):
     try_only = False
     if username not in repo_cfg['reviewers'] and username != my_username:
-        if username in repo_cfg.get('try_users', []):
+        if username == state.delegate:
+            # Allow users who have been delegated review powers
+            pass
+        elif username in repo_cfg.get('try_users', []):
             try_only = True
         else:
             return False
@@ -285,6 +290,28 @@ def parse_commands(body, username, repo_cfg, state, my_username, db, *, realtime
             except ValueError: pass
 
             state.save()
+
+        elif word.startswith('delegate='):
+            if try_only:
+                state.add_comment(':key: Insufficient privileges')
+                continue
+            state.delegate = word[len('delegate='):]
+            state.save()
+
+            state.add_comment(':v: @{} can now approve this pull request'.format(state.delegate))
+
+        elif word == 'delegate-':
+            state.delegate = ''
+            state.save()
+
+        elif word == 'delegate+':
+            if try_only:
+                state.add_comment(':key: Insufficient privileges')
+                continue
+            state.delegate = state.get_repo().pull_request(state.num).user.login
+            state.save()
+
+            state.add_comment(':v: @{} can now approve this pull request'.format(state.delegate))
 
         elif word == 'retry' and realtime:
             state.set_status('')
@@ -760,6 +787,7 @@ def main():
         priority INTEGER,
         try_ INTEGER,
         rollup INTEGER,
+        delegate TEXT,
         UNIQUE (repo, num)
     )''')
 
@@ -787,8 +815,8 @@ def main():
         repo_states = {}
         repos[repo_label] = None
 
-        db_query(db, 'SELECT num, head_sha, status, title, body, head_ref, base_ref, assignee, approved_by, priority, try_, rollup, merge_sha FROM pull WHERE repo = ?', [repo_label])
-        for num, head_sha, status, title, body, head_ref, base_ref, assignee, approved_by, priority, try_, rollup, merge_sha in db.fetchall():
+        db_query(db, 'SELECT num, head_sha, status, title, body, head_ref, base_ref, assignee, approved_by, priority, try_, rollup, delegate, merge_sha FROM pull WHERE repo = ?', [repo_label])
+        for num, head_sha, status, title, body, head_ref, base_ref, assignee, approved_by, priority, try_, rollup, delegate, merge_sha in db.fetchall():
             state = PullReqState(num, head_sha, status, db, repo_label, mergeable_que, gh, repo_cfg['owner'], repo_cfg['name'], repos)
             state.title = title
             state.body = body
@@ -800,6 +828,7 @@ def main():
             state.priority = int(priority)
             state.try_ = bool(try_)
             state.rollup = bool(rollup)
+            state.delegate = delegate
 
             if merge_sha:
                 if 'buildbot' in repo_cfg:
