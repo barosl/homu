@@ -283,13 +283,16 @@ def github():
 
         elif action == 'closed':
             state = g.states[repo_label][pull_num]
-            if getattr(state, 'rebased', False):
-                utils.github_set_ref(
-                    state.get_repo(),
-                    'heads/' + state.base_ref,
-                    state.merge_sha,
-                    force=True,
-                )
+            if hasattr(state, 'fake_merge_sha'):
+                try:
+                    utils.github_set_ref(
+                        state.get_repo(),
+                        'heads/' + state.base_ref,
+                        state.merge_sha,
+                        force=True,
+                    )
+                except github3.models.GitHubError:
+                    state.add_comment(':boom: Failed to recover from the artificial commit. See {} for details.'.format(state.fake_merge_sha))
 
             del g.states[repo_label][pull_num]
 
@@ -387,13 +390,12 @@ def report_build_res(succ, url, builder, state, logger, repo_cfg):
 
             if state.approved_by and not state.try_:
                 try:
-                    utils.github_set_ref(
-                        state.get_repo(),
-                        'heads/' + state.base_ref,
-                        state.merge_sha,
-                    )
+                    try: utils.github_set_ref(state.get_repo(), 'heads/' + state.base_ref, state.merge_sha)
+                    except github3.models.GitHubError:
+                        utils.github_create_status(state.get_repo(), state.merge_sha, 'success', '', 'Branch protection bypassed', context='homu')
+                        utils.github_set_ref(state.get_repo(), 'heads/' + state.base_ref, state.merge_sha)
 
-                    state.fake_merged(repo_cfg)
+                    state.fake_merge(repo_cfg)
 
                 except github3.models.GitHubError as e:
                     state.set_status('error')

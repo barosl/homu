@@ -206,13 +206,24 @@ class PullReqState:
         self.title = issue.title
         self.body = issue.body
 
-    def fake_merged(self, repo_cfg):
+    def fake_merge(self, repo_cfg):
         if repo_cfg.get('linear', False) or repo_cfg.get('autosquash', False):
-            msg = '!!! Temporary commit !!!\n\nThis commit is artifically made up to mark PR {} as merged.\n\nIf this commit remained in the history, you may reset HEAD to {}\n\n[ci skip]'.format(self.num, self.merge_sha)
+            msg = '''!!! Temporary commit !!!
+
+This commit is artifically made up to mark PR {} as merged.
+
+If this commit remained in the history, you can safely reset HEAD to {}.
+This is possibly due to protected branches, which forbids force-pushing.
+You are advised to turn off protected branches, or disable certain Homu
+features that require force-pushing, such as linear history or
+auto-squashing.
+
+[ci skip]'''.format(self.num, self.merge_sha)
 
             # `merge()` will return `None` if the `head_sha` commit is already part of the `base_ref` branch, which means rebasing didn't have to modify the original commit
-            if self.get_repo().merge(self.base_ref, self.head_sha, msg):
-                self.rebased = True
+            merge_commit = self.get_repo().merge(self.base_ref, self.head_sha, msg)
+            if merge_commit:
+                self.fake_merge_sha = merge_commit.sha
 
 def sha_cmp(short, full):
     return len(short) >= 4 and short == full[:len(short)]
@@ -366,6 +377,19 @@ def parse_commands(body, username, repo_cfg, state, my_username, db, *, realtime
 
     return state_changed
 
+def git_push(fpath, branch, state):
+    merge_sha = subprocess.check_output(['git', '-C', fpath, 'rev-parse', 'HEAD']).decode('ascii').strip()
+
+    if utils.silent_call(['git', '-C', fpath, 'push', '-f', 'origin', branch]):
+        utils.logged_call(['git', '-C', fpath, 'branch', '-f', 'homu-tmp', branch])
+        utils.logged_call(['git', '-C', fpath, 'push', '-f', 'origin', 'homu-tmp'])
+
+        utils.github_create_status(state.get_repo(), merge_sha, 'success', '', 'Branch protection bypassed', context='homu')
+
+        utils.logged_call(['git', '-C', fpath, 'push', '-f', 'origin', branch])
+
+    return merge_sha
+
 def create_merge(state, repo_cfg, branch, git_cfg):
     base_sha = state.get_repo().ref('heads/' + state.base_ref).object.sha
 
@@ -416,9 +440,8 @@ def create_merge(state, repo_cfg, branch, git_cfg):
                         desc = 'Auto-squashing failed'
             else:
                 utils.logged_call(['git', '-C', fpath, '-c', 'user.name=' + git_cfg['name'], '-c', 'user.email=' + git_cfg['email'], 'commit', '-m', merge_msg, '--allow-empty'])
-                utils.logged_call(['git', '-C', fpath, 'push', '-f', 'origin', branch])
 
-                return subprocess.check_output(['git', '-C', fpath, 'rev-parse', 'HEAD']).decode('ascii').strip()
+                return git_push(fpath, branch, state)
         else:
             utils.logged_call(['git', '-C', fpath, 'checkout', '-B', 'homu-tmp', state.head_sha])
 
@@ -438,9 +461,7 @@ def create_merge(state, repo_cfg, branch, git_cfg):
                 except subprocess.CalledProcessError:
                     pass
                 else:
-                    utils.logged_call(['git', '-C', fpath, 'push', '-f', 'origin', branch])
-
-                    return subprocess.check_output(['git', '-C', fpath, 'rev-parse', 'HEAD']).decode('ascii').strip()
+                    return git_push(fpath, branch, state)
     else:
         if repo_cfg.get('linear', False) or repo_cfg.get('autosquash', False):
             raise RuntimeError('local_git must be turned on to use this feature')
@@ -511,7 +532,7 @@ def start_build(state, repo_cfgs, buildbot_slots, logger, db, git_cfg):
                                 state.merge_sha = merge_sha
                                 state.save()
 
-                                state.fake_merged(repo_cfg)
+                                state.fake_merge(repo_cfg)
                                 return True
                 break
 
