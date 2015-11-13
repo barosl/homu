@@ -16,6 +16,7 @@ from queue import Queue
 import os
 import subprocess
 from .git_helper import SSH_KEY_FILE
+import shlex
 
 STATUS_TO_PRIORITY = {
     'success': 0,
@@ -435,7 +436,10 @@ def create_merge(state, repo_cfg, branch, git_cfg):
                     if utils.silent_call(['git', '-C', fpath, 'rebase', base_sha]) == 0:
                         desc = 'Auto-squashing failed'
             else:
-                utils.logged_call(['git', '-C', fpath, '-c', 'user.name=' + git_cfg['name'], '-c', 'user.email=' + git_cfg['email'], 'commit', '-m', merge_msg, '--allow-empty'])
+                text = '\nPull request: #{}\nApproved by: {}'.format(state.num, '<try>' if state.try_ else state.approved_by)
+                msg_code = 'cat && echo {}'.format(shlex.quote(text))
+                env_code = 'export GIT_COMMITTER_NAME={} && export GIT_COMMITTER_EMAIL={} && unset GIT_COMMITTER_DATE'.format(shlex.quote(git_cfg['name']), shlex.quote(git_cfg['email']))
+                utils.logged_call(['git', '-C', fpath, 'filter-branch', '-f', '--msg-filter', msg_code, '--env-filter', env_code, '{}..'.format(base_sha)])
 
                 return git_push(fpath, branch, state)
         else:
