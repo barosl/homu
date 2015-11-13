@@ -11,7 +11,8 @@ def github_set_ref(repo, ref, sha, *, force=False, auto_create=True):
     try: js = repo._json(repo._patch(url, data=json.dumps(data)), 200)
     except github3.models.GitHubError as e:
         if e.code == 422 and auto_create:
-            return repo.create_ref('refs/' + ref, sha)
+            try: return repo.create_ref('refs/' + ref, sha)
+            except github3.models.GitHubError: raise e
         else:
             raise
 
