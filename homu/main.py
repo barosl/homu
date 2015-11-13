@@ -410,21 +410,17 @@ def create_merge(state, repo_cfg, branch, git_cfg):
 
         fpath = 'cache/{}/{}'.format(repo_cfg['owner'], repo_cfg['name'])
         url = 'git@github.com:{}/{}.git'.format(repo_cfg['owner'], repo_cfg['name'])
-        head_repo_url = 'https://github.com/{}/{}.git'.format(*pull.head.repo)
-        head_branch = state.head_ref.split(':')[1]
 
         os.makedirs(os.path.dirname(SSH_KEY_FILE), exist_ok=True)
         with open(SSH_KEY_FILE, 'w') as fp:
             fp.write(git_cfg['ssh_key'])
         os.chmod(SSH_KEY_FILE, 0o600)
 
-        if os.path.exists(fpath):
-            utils.logged_call(['git', '-C', fpath, 'fetch', '--no-tags', 'origin', state.base_ref])
-        else:
-            utils.logged_call(['git', 'clone', url, fpath])
+        if not os.path.exists(fpath):
+            utils.logged_call(['git', 'init', fpath])
+            utils.logged_call(['git', '-C', fpath, 'remote', 'add', 'origin', url])
 
-        utils.silent_call(['git', '-C', fpath, 'remote', 'remove', 'head_repo'])
-        utils.logged_call(['git', '-C', fpath, 'remote', 'add', '-f', '--no-tags'] + (['-t', head_branch] if head_branch else []) + ['head_repo', head_repo_url])
+        utils.logged_call(['git', '-C', fpath, 'fetch', 'origin', state.base_ref, 'pull/{}/head'.format(state.num)])
 
         utils.silent_call(['git', '-C', fpath, 'rebase', '--abort'])
         utils.silent_call(['git', '-C', fpath, 'merge', '--abort'])
