@@ -638,6 +638,9 @@ def process_queue(states, repos, repo_cfgs, logger, buildbot_slots, db, git_cfg)
             if state.status == 'pending' and not state.try_:
                 break
 
+            elif state.status == 'success' and hasattr(state, 'fake_merge_sha'):
+                break
+
             elif state.status == '' and state.approved_by:
                 if start_build_or_rebuild(state, repo_cfgs, buildbot_slots, logger, db, git_cfg):
                     return
