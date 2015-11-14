@@ -640,4 +640,8 @@ def start(cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots, 
     g.mergeable_que = mergeable_que
     g.gh = gh
 
-    run(host=cfg['web'].get('host', ''), port=cfg['web']['port'], server='waitress')
+    try: run(host=cfg['web'].get('host', ''), port=cfg['web']['port'], server='waitress')
+    except OSError as e:
+        import sys, os
+        print(e, file=sys.stderr)
+        os._exit(1)
