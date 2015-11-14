@@ -11,6 +11,9 @@ import pkg_resources
 from bottle import get, post, run, request, redirect, abort, response
 import hashlib
 from threading import Thread
+import time
+import sys
+import os
 
 import bottle; bottle.BaseRequest.MEMFILE_MAX = 1024 * 1024 * 10
 
@@ -284,14 +287,32 @@ def github():
         elif action == 'closed':
             state = g.states[repo_label][pull_num]
             if hasattr(state, 'fake_merge_sha'):
-                try:
-                    utils.github_set_ref(
-                        state.get_repo(),
-                        'heads/' + state.base_ref,
-                        state.merge_sha,
-                        force=True,
-                    )
-                except github3.models.GitHubError:
+                err = None
+                exc_info = None
+
+                for i in range(3, 0, -1):
+                    try:
+                        utils.github_set_ref(
+                            state.get_repo(),
+                            'heads/' + state.base_ref,
+                            state.merge_sha,
+                            force=True,
+                        )
+                    except (github3.models.GitHubError, requests.exceptions.RequestException) as e:
+                        print('* Intermittent GitHub error: {}'.format(e), file=sys.stderr)
+
+                        err = e
+                        exc_info = sys.exc_info()
+
+                        if i != 1: time.sleep(1)
+                    else:
+                        err = None
+                        break
+
+                if err:
+                    print('* GitHub failure in {}'.format(state), file=sys.stderr)
+                    traceback.print_exception(*exc_info)
+
                     state.add_comment(':boom: Failed to recover from the artificial commit. See {} for details.'.format(state.fake_merge_sha))
 
             del g.states[repo_label][pull_num]
@@ -642,6 +663,5 @@ def start(cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots, 
 
     try: run(host=cfg['web'].get('host', ''), port=cfg['web']['port'], server='waitress')
     except OSError as e:
-        import sys, os
         print(e, file=sys.stderr)
         os._exit(1)

@@ -17,6 +17,7 @@ import os
 import subprocess
 from .git_helper import SSH_KEY_FILE
 import shlex
+import sys
 
 STATUS_TO_PRIORITY = {
     'success': 0,
@@ -110,12 +111,14 @@ class PullReqState:
     def __lt__(self, other):
         return self.sort_key() < other.sort_key()
 
-    def add_comment(self, text):
+    def get_issue(self):
         issue = getattr(self, 'issue', None)
         if not issue:
             issue = self.issue = self.get_repo().issue(self.num)
+        return issue
 
-        issue.create_comment(text)
+    def add_comment(self, text):
+        self.get_issue().create_comment(text)
 
     def set_status(self, status):
         self.status = status
@@ -221,10 +224,32 @@ auto-squashing.
 
 [ci skip]'''.format(self.num, self.merge_sha)
 
-            # `merge()` will return `None` if the `head_sha` commit is already part of the `base_ref` branch, which means rebasing didn't have to modify the original commit
-            merge_commit = self.get_repo().merge(self.base_ref, self.head_sha, msg)
-            if merge_commit:
-                self.fake_merge_sha = merge_commit.sha
+            err = None
+            exc_info = None
+
+            for i in range(3, 0, -1):
+                try:
+                    # `merge()` will return `None` if the `head_sha` commit is already part of the `base_ref` branch, which means rebasing didn't have to modify the original commit
+                    merge_commit = self.get_repo().merge(self.base_ref, self.head_sha, msg)
+                    if merge_commit:
+                        self.fake_merge_sha = merge_commit.sha
+                except (github3.models.GitHubError, requests.exceptions.RequestException) as e:
+                    print('* Intermittent GitHub error: {}'.format(e), file=sys.stderr)
+
+                    err = e
+                    exc_info = sys.exc_info()
+
+                    if i != 1: time.sleep(1)
+                else:
+                    err = None
+                    break
+
+            if err:
+                print('* GitHub failure in {}'.format(self), file=sys.stderr)
+                traceback.print_exception(*exc_info)
+
+                self.add_comment(':warning: Unable to mark this PR as merged. Closing instead. ({})'.format(err))
+                self.get_issue().close()
 
 def sha_cmp(short, full):
     return len(short) >= 4 and short == full[:len(short)]
