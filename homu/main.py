@@ -543,22 +543,23 @@ def start_build(state, repo_cfgs, buildbot_slots, logger, db, git_cfg):
                         res = requests.get(url)
                         travis_sha = json.loads(res.text)['commit']
                         travis_commit = state.get_repo().commit(travis_sha)
-                        base_sha = state.get_repo().ref('heads/' + state.base_ref).object.sha
-                        if [travis_commit.parents[0]['sha'], travis_commit.parents[1]['sha']] == [base_sha, state.head_sha]:
-                            merge_sha = create_merge(state, repo_cfg, state.base_ref, git_cfg)
-                            if merge_sha:
-                                desc = 'Test exempted'
-                                url = info.target_url
+                        if travis_commit:
+                            base_sha = state.get_repo().ref('heads/' + state.base_ref).object.sha
+                            if [travis_commit.parents[0]['sha'], travis_commit.parents[1]['sha']] == [base_sha, state.head_sha]:
+                                merge_sha = create_merge(state, repo_cfg, state.base_ref, git_cfg)
+                                if merge_sha:
+                                    desc = 'Test exempted'
+                                    url = info.target_url
 
-                                state.set_status('success')
-                                utils.github_create_status(state.get_repo(), state.head_sha, 'success', url, desc, context='homu')
-                                state.add_comment(':zap: {} - [{}]({})'.format(desc, 'status', url))
+                                    state.set_status('success')
+                                    utils.github_create_status(state.get_repo(), state.head_sha, 'success', url, desc, context='homu')
+                                    state.add_comment(':zap: {} - [{}]({})'.format(desc, 'status', url))
 
-                                state.merge_sha = merge_sha
-                                state.save()
+                                    state.merge_sha = merge_sha
+                                    state.save()
 
-                                state.fake_merge(repo_cfg)
-                                return True
+                                    state.fake_merge(repo_cfg)
+                                    return True
                 break
 
     merge_sha = create_merge(state, repo_cfg, branch, git_cfg)
