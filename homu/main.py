@@ -690,6 +690,9 @@ def fetch_mergeability(mergeable_que):
         try:
             state, cause = mergeable_que.get()
 
+            if state.status == 'success':
+                continue
+
             mergeable = state.get_repo().pull_request(state.num).mergeable
             if mergeable is None:
                 time.sleep(5)
