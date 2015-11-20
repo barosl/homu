@@ -287,33 +287,18 @@ def github():
         elif action == 'closed':
             state = g.states[repo_label][pull_num]
             if hasattr(state, 'fake_merge_sha'):
-                err = None
-                exc_info = None
+                def inner():
+                    utils.github_set_ref(
+                        state.get_repo(),
+                        'heads/' + state.base_ref,
+                        state.merge_sha,
+                        force=True,
+                    )
 
-                for i in range(3, 0, -1):
-                    try:
-                        utils.github_set_ref(
-                            state.get_repo(),
-                            'heads/' + state.base_ref,
-                            state.merge_sha,
-                            force=True,
-                        )
-                    except (github3.models.GitHubError, requests.exceptions.RequestException) as e:
-                        print('* Intermittent GitHub error: {}'.format(e), file=sys.stderr)
+                def fail(err):
+                    state.add_comment(':boom: Failed to recover from the artificial commit. See {} for details. ({})'.format(state.fake_merge_sha, err))
 
-                        err = e
-                        exc_info = sys.exc_info()
-
-                        if i != 1: time.sleep(1)
-                    else:
-                        err = None
-                        break
-
-                if err:
-                    print('* GitHub failure in {}'.format(state), file=sys.stderr)
-                    traceback.print_exception(*exc_info)
-
-                    state.add_comment(':boom: Failed to recover from the artificial commit. See {} for details.'.format(state.fake_merge_sha))
+                utils.retry_until(inner, fail, state)
 
             del g.states[repo_label][pull_num]
 

@@ -224,32 +224,17 @@ auto-squashing.
 
 [ci skip]'''.format(self.num, self.merge_sha)
 
-            err = None
-            exc_info = None
+            def inner():
+                # `merge()` will return `None` if the `head_sha` commit is already part of the `base_ref` branch, which means rebasing didn't have to modify the original commit
+                merge_commit = self.get_repo().merge(self.base_ref, self.head_sha, msg)
+                if merge_commit:
+                    self.fake_merge_sha = merge_commit.sha
 
-            for i in range(3, 0, -1):
-                try:
-                    # `merge()` will return `None` if the `head_sha` commit is already part of the `base_ref` branch, which means rebasing didn't have to modify the original commit
-                    merge_commit = self.get_repo().merge(self.base_ref, self.head_sha, msg)
-                    if merge_commit:
-                        self.fake_merge_sha = merge_commit.sha
-                except (github3.models.GitHubError, requests.exceptions.RequestException) as e:
-                    print('* Intermittent GitHub error: {}'.format(e), file=sys.stderr)
-
-                    err = e
-                    exc_info = sys.exc_info()
-
-                    if i != 1: time.sleep(1)
-                else:
-                    err = None
-                    break
-
-            if err:
-                print('* GitHub failure in {}'.format(self), file=sys.stderr)
-                traceback.print_exception(*exc_info)
-
+            def fail(err):
                 self.add_comment(':warning: Unable to mark this PR as merged. Closing instead. ({})'.format(err))
                 self.get_issue().close()
+
+            utils.retry_until(inner, fail, self)
 
 def sha_cmp(short, full):
     return len(short) >= 4 and short == full[:len(short)]
@@ -410,7 +395,13 @@ def git_push(fpath, branch, state):
         utils.logged_call(['git', '-C', fpath, 'branch', '-f', 'homu-tmp', branch])
         utils.logged_call(['git', '-C', fpath, 'push', '-f', 'origin', 'homu-tmp'])
 
-        utils.github_create_status(state.get_repo(), merge_sha, 'success', '', 'Branch protection bypassed', context='homu')
+        def inner():
+            utils.github_create_status(state.get_repo(), merge_sha, 'success', '', 'Branch protection bypassed', context='homu')
+
+        def fail(err):
+            state.add_comment(':boom: Unable to create a status for {} ({})'.format(merge_sha, err))
+
+        utils.retry_until(inner, fail, state)
 
         utils.logged_call(['git', '-C', fpath, 'push', '-f', 'origin', branch])
 

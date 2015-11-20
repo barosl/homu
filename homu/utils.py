@@ -3,6 +3,9 @@ import github3
 import logging
 import subprocess
 import sys
+import traceback
+import requests
+import time
 
 def github_set_ref(repo, ref, sha, *, force=False, auto_create=True):
     url = repo._build_url('git', 'refs', ref, base_url=repo._api)
@@ -58,3 +61,27 @@ def logged_call(args):
 
 def silent_call(args):
     return subprocess.call(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+def retry_until(inner, fail, state):
+    err = None
+    exc_info = None
+
+    for i in range(3, 0, -1):
+        try:
+            inner()
+        except (github3.models.GitHubError, requests.exceptions.RequestException) as e:
+            print('* Intermittent GitHub error: {}'.format(e), file=sys.stderr)
+
+            err = e
+            exc_info = sys.exc_info()
+
+            if i != 1: time.sleep(1)
+        else:
+            err = None
+            break
+
+    if err:
+        print('* GitHub failure in {}'.format(state), file=sys.stderr)
+        traceback.print_exception(*exc_info)
+
+        fail(err)
