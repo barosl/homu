@@ -31,6 +31,8 @@ STATUS_TO_PRIORITY = {
 INTERRUPTED_BY_HOMU_FMT = 'Interrupted by Homu ({})'
 INTERRUPTED_BY_HOMU_RE = re.compile(r'Interrupted by Homu \((.+?)\)')
 
+TEST_TIMEOUT = 3600 * 10
+
 @contextmanager
 def buildbot_sess(repo_cfg):
     sess = requests.Session()
@@ -73,6 +75,7 @@ class PullReqState:
         self.owner = owner
         self.name = name
         self.repos = repos
+        self.test_started = time.time() # FIXME: Save in the local database
 
     def head_advanced(self, head_sha, *, use_db=True):
         self.head_sha = head_sha
@@ -569,6 +572,7 @@ def start_build(state, repo_cfgs, buildbot_slots, logger, db, git_cfg):
                                                               state.name,
                                                               state.num, branch, state.merge_sha))
 
+    state.test_started = time.time()
     state.set_status('pending')
     desc = '{} commit {:.7} with merge {:.7}...'.format('Trying' if state.try_ else 'Testing', state.head_sha, state.merge_sha)
     utils.github_create_status(state.get_repo(), state.head_sha, 'pending', '', desc, context='homu')
@@ -628,6 +632,7 @@ def start_rebuild(state, repo_cfgs):
                 state.add_comment(':bomb: Failed to start rebuilding: `{}`'.format(err))
                 return False
 
+    state.test_started = time.time()
     state.set_status('pending')
 
     msg_1 = 'Previous build results'
@@ -706,10 +711,36 @@ def fetch_mergeability(mergeable_que):
             state.set_mergeable(mergeable, que=False)
 
         except:
+            print('* Error while fetching mergeability')
             traceback.print_exc()
 
         finally:
             mergeable_que.task_done()
+
+def check_timeout(states, queue_handler):
+    while True:
+        try:
+            for repo_label, repo_states in states.items():
+                for num, state in repo_states.items():
+                    if state.status == 'pending' and time.time() - state.test_started >= TEST_TIMEOUT:
+                        print('* Test timed out: {}'.format(state))
+
+                        state.merge_sha = ''
+                        state.save()
+                        state.set_status('failure')
+
+                        desc = 'Test timed out'
+                        utils.github_create_status(state.get_repo(), state.head_sha, 'failure', '', desc, context='homu')
+                        state.add_comment(':boom: {}'.format(desc))
+
+                        queue_handler()
+
+        except:
+            print('* Error while checking timeout')
+            traceback.print_exc()
+
+        finally:
+            time.sleep(3600)
 
 def synchronize(repo_label, repo_cfg, logger, gh, states, repos, db, mergeable_que, my_username, repo_labels):
     logger.info('Synchronizing {}...'.format(repo_label))
@@ -934,6 +965,7 @@ def main():
     Thread(target=server.start, args=[cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots, my_username, db, repo_labels, mergeable_que, gh]).start()
 
     Thread(target=fetch_mergeability, args=[mergeable_que]).start()
+    Thread(target=check_timeout, args=[states, queue_handler]).start()
 
     queue_handler()
 
