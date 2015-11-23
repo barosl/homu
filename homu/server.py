@@ -228,6 +228,7 @@ def github():
                 state,
                 g.my_username,
                 g.db,
+                g.states,
                 realtime=True,
                 sha=original_commit_id,
             ):
@@ -267,6 +268,7 @@ def github():
                         state,
                         g.my_username,
                         g.db,
+                        g.states,
                     ) or found
 
                 status = ''
@@ -350,6 +352,7 @@ def github():
                 state,
                 g.my_username,
                 g.db,
+                g.states,
                 realtime=True,
             ):
                 state.save()

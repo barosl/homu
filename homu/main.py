@@ -245,7 +245,7 @@ def sha_cmp(short, full):
 def sha_or_blank(sha):
     return sha if re.match(r'^[0-9a-f]+$', sha) else ''
 
-def parse_commands(body, username, repo_cfg, state, my_username, db, *, realtime=False, sha=''):
+def parse_commands(body, username, repo_cfg, state, my_username, db, states, *, realtime=False, sha=''):
     try_only = False
     if username not in repo_cfg['reviewers'] and username != my_username:
         if username == state.delegate:
@@ -288,6 +288,26 @@ def parse_commands(body, username, repo_cfg, state, my_username, db, *, realtime
                 state.save()
 
                 assert any(x != '0' for x in state.head_sha)
+
+            if state.approved_by:
+                for _state in states[state.repo_label].values():
+                    if _state.status == 'pending':
+                        break
+                else:
+                    _state = None
+
+                lines = []
+
+                if state.status in ['failure', 'error']:
+                    lines.append('- This pull request previously failed. You should add more commits to fix the bug, or use `retry` to trigger a build again.')
+
+                if _state:
+                    lines.append('- There\'s another pull request that is currently being tested, blocking this pull request: #{}'.format(_state.num))
+
+                if lines: lines.insert(0, '')
+                lines.insert(0, ':bulb: This pull request was already approved, no need to approve it again.')
+
+                state.add_comment('\n'.join(lines))
 
             if sha_cmp(cur_sha, state.head_sha):
                 state.approved_by = approver
@@ -783,6 +803,7 @@ def synchronize(repo_label, repo_cfg, logger, gh, states, repos, db, mergeable_q
                     state,
                     my_username,
                     db,
+                    states,
                     sha=comment.original_commit_id,
                 )
 
@@ -794,6 +815,7 @@ def synchronize(repo_label, repo_cfg, logger, gh, states, repos, db, mergeable_q
                 state,
                 my_username,
                 db,
+                states,
             )
 
         state.save()
