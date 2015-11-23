@@ -54,7 +54,9 @@ def queue(repo_label):
 
     states = []
     for label in labels:
-        states += g.states[label].values()
+        try: states += g.states[label].values()
+        except KeyError:
+            abort(404, 'No such repository: {}'.format(label))
 
     pull_states = sorted(states)
 
