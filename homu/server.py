@@ -14,6 +14,7 @@ from threading import Thread
 import time
 import sys
 import os
+import traceback
 
 import bottle; bottle.BaseRequest.MEMFILE_MAX = 1024 * 1024 * 10
 
@@ -623,6 +624,20 @@ def admin():
         assert repo_cfg['name'] == g.repo_cfgs[repo_label]['name']
 
         g.repo_cfgs[repo_label] = repo_cfg
+
+        return 'OK'
+
+    elif request.json['cmd'] == 'sync_all':
+        def inner():
+            for repo_label in g.repos:
+                try: synchronize(repo_label, g.repo_cfgs[repo_label], g.logger, g.gh, g.states, g.repos, g.db, g.mergeable_que, g.my_username, g.repo_labels)
+                except:
+                    print('* Error while synchronizing {}'.format(repo_label))
+                    traceback.print_exc()
+
+            print('* Done synchronizing all')
+
+        Thread(target=inner).start()
 
         return 'OK'
 
