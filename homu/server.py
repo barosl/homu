@@ -222,22 +222,25 @@ def github():
             body = info['comment']['body']
             username = info['sender']['login']
 
-            state = g.states[repo_label][pull_num]
+            state = g.states[repo_label].get(pull_num)
+            if state:
+                state.title = info['pull_request']['title']
+                state.body = info['pull_request']['body']
 
-            if parse_commands(
-                body,
-                username,
-                repo_cfg,
-                state,
-                g.my_username,
-                g.db,
-                g.states,
-                realtime=True,
-                sha=original_commit_id,
-            ):
-                state.save()
+                if parse_commands(
+                    body,
+                    username,
+                    repo_cfg,
+                    state,
+                    g.my_username,
+                    g.db,
+                    g.states,
+                    realtime=True,
+                    sha=original_commit_id,
+                ):
+                    state.save()
 
-                g.queue_handler()
+                    g.queue_handler()
 
     elif event_type == 'pull_request':
         action = info['action']
