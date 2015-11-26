@@ -979,6 +979,11 @@ def main():
 
         state.mergeable = bool(mergeable) if mergeable is not None else None
 
+    db_query(db, 'SELECT repo FROM pull GROUP BY repo')
+    for repo_label, in db.fetchall():
+        if repo_label not in repos:
+            db_query(db, 'DELETE FROM pull WHERE repo = ?', [repo_label])
+
     queue_handler_lock = Lock()
     def queue_handler():
         with queue_handler_lock:
