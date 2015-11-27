@@ -775,6 +775,13 @@ def synchronize(repo_label, repo_cfg, logger, gh, states, repos, db, mergeable_q
     db_query(db, 'DELETE FROM build_res WHERE repo = ?', [repo_label])
     db_query(db, 'DELETE FROM mergeable WHERE repo = ?', [repo_label])
 
+    saved_states = {}
+    for num, state in states[repo_label].items():
+        saved_states[num] = {
+            'merge_sha': state.merge_sha,
+            'build_res': state.build_res,
+        }
+
     states[repo_label] = {}
     repos[repo_label] = repo
 
@@ -821,6 +828,11 @@ def synchronize(repo_label, repo_cfg, logger, gh, states, repos, db, mergeable_q
                 db,
                 states,
             )
+
+        saved_state = saved_states.get(pull.number)
+        if saved_state:
+            for key, val in saved_state.items():
+                setattr(state, key, val)
 
         state.save()
 
