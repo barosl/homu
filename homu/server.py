@@ -418,11 +418,10 @@ def buildbot():
 
     response.content_type = 'text/plain'
 
-    lazy_debug(logger, lambda: 'info: {}'.format(info))
-
     for row in json.loads(request.forms.packets):
         if row['event'] == 'buildFinished':
             info = row['payload']['build']
+            lazy_debug(logger, lambda: 'info: {}'.format(info))
             props = dict(x[:2] for x in info['properties'])
 
             if 'retry' in info['text']: continue
@@ -494,6 +493,7 @@ def buildbot():
 
         elif row['event'] == 'buildStarted':
             info = row['payload']['build']
+            lazy_debug(logger, lambda: 'info: {}'.format(info))
             props = dict(x[:2] for x in info['properties'])
 
             if not props['revision']: continue
