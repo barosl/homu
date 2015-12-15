@@ -51,6 +51,9 @@
                 <tr>
                     <th class="hide">Sort key</th>
                     <th><input type="checkbox"></th>
+                    {% if multiple %}
+                        <th>Repository</th>
+                    {% endif %}
                     <th>#</th>
                     <th>Status</th>
                     <th>Priority</th>
@@ -67,6 +70,9 @@
                 <tr>
                     <td class="hide">{{loop.index}}</td>
                     <td><input type="checkbox" data-num="{{state.num}}"></td>
+                    {% if multiple %}
+                        <td><a href="{{state.repo_url}}">{{state.repo}}</a></td>
+                    {% endif %}
                     <td><a href="{{state.url}}">{{state.num}}</a></td>
                     <td class="{{state.status}}">{{state.status}}{{state.status_ext}}</td>
                     <td>{{state.priority}}</td>
