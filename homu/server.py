@@ -43,14 +43,13 @@ def queue(repo_label):
     logger = g.logger.getChild('queue')
 
     lazy_debug(logger, lambda: 'repo_label: {}'.format(repo_label))
-    multiple = False
+
     if repo_label == 'all':
         labels = g.repos.keys()
         multiple = True
     else:
         labels = repo_label.split('+')
-
-    multiple = multiple or (len(labels) > 1)
+        multiple = len(labels) > 1
 
     states = []
     for label in labels:
@@ -71,7 +70,7 @@ def queue(repo_label):
             'head_ref': state.head_ref,
             'mergeable': 'yes' if state.mergeable is True else 'no' if state.mergeable is False else '',
             'assignee': state.assignee,
-            'repo': state.name,
+            'repo_label': state.repo_label,
             'repo_url': 'https://github.com/{}/{}'.format(state.owner, state.name),
         })
 
