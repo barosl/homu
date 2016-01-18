@@ -282,14 +282,14 @@ def parse_commands(body, username, repo_cfg, state, my_username, db, states, *, 
             # condition. Last time, it happened when squashing commits in a PR. In this case, we
             # just try to retrieve the head SHA manually.
             if all(x == '0' for x in state.head_sha):
-                state.add_comment(':bangbang: Invalid head SHA found, retrying: `{}`'.format(state.head_sha))
+                if realtime: state.add_comment(':bangbang: Invalid head SHA found, retrying: `{}`'.format(state.head_sha))
 
                 state.head_sha = state.get_repo().pull_request(state.num).head.sha
                 state.save()
 
                 assert any(x != '0' for x in state.head_sha)
 
-            if state.approved_by:
+            if state.approved_by and realtime and username != my_username:
                 for _state in states[state.repo_label].values():
                     if _state.status == 'pending':
                         break
@@ -302,7 +302,10 @@ def parse_commands(body, username, repo_cfg, state, my_username, db, states, *, 
                     lines.append('- This pull request previously failed. You should add more commits to fix the bug, or use `retry` to trigger a build again.')
 
                 if _state:
-                    lines.append('- There\'s another pull request that is currently being tested, blocking this pull request: #{}'.format(_state.num))
+                    if state == _state:
+                        lines.append('- This pull request is currently being tested. If there\'s no response from the continuous integration service, you may use `retry` to trigger a build again.')
+                    else:
+                        lines.append('- There\'s another pull request that is currently being tested, blocking this pull request: #{}'.format(_state.num))
 
                 if lines: lines.insert(0, '')
                 lines.insert(0, ':bulb: This pull request was already approved, no need to approve it again.')
