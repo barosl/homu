@@ -50,8 +50,10 @@ def queue(repo_label):
 
     if repo_label == 'all':
         labels = g.repos.keys()
+        multiple = True
     else:
         labels = repo_label.split('+')
+        multiple = len(labels) > 1
 
     states = []
     for label in labels:
@@ -74,6 +76,8 @@ def queue(repo_label):
             'head_ref': state.head_ref,
             'mergeable': 'yes' if state.mergeable is True else 'no' if state.mergeable is False else '',
             'assignee': state.assignee,
+            'repo_label': state.repo_label,
+            'repo_url': 'https://github.com/{}/{}'.format(state.owner, state.name),
         })
 
     return g.tpls['queue'].render(
@@ -84,6 +88,7 @@ def queue(repo_label):
         approved = len([x for x in pull_states if x.approved_by]),
         rolled_up = len([x for x in pull_states if x.rollup]),
         failed = len([x for x in pull_states if x.status == 'failure' or x.status == 'error']),
+        multiple = multiple,
     )
 
 @get('/callback')
