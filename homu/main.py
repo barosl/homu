@@ -248,7 +248,7 @@ def sha_or_blank(sha):
 def parse_commands(body, username, repo_cfg, state, my_username, db, states, *, realtime=False, sha=''):
     try_only = False
     if username not in repo_cfg['reviewers'] and username != my_username:
-        if username == state.delegate:
+        if username.lower() == state.delegate.lower():
             pass # Allow users who have been delegated review powers
         elif username in repo_cfg.get('try_users', []):
             try_only = True
